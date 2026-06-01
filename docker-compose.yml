@@ -16,7 +16,7 @@ services:
       - mysql_data:/var/lib/mysql
 
   backend:
-    build: ./BE
+    build: .
     # image: game/begame
     restart: always
     ports:
