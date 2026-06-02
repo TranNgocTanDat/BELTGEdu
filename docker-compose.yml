@@ -18,11 +18,16 @@ services:
     # image: game/begame
     restart: always
     ports:
-      - "5001:5001"
+      - "5001:8080"
     environment:
       - DB_URL=jdbc:mysql://mysql:3306/beltgedu
       - DB_USERNAME=root
       - DB_PASSWORD=Tandat1xxx
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - MAIL_USERNAME=${MAIL_USERNAME}
+      - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - JWT_SIGNER_KEY=${JWT_SIGNER_KEY}
     depends_on:
       - mysql
 
