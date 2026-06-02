@@ -6,11 +6,13 @@ import com.example.beprojectweb.dto.request.UserCreationRequest;
 import com.example.beprojectweb.dto.request.VerifyUser;
 import com.example.beprojectweb.dto.response.AuthenticationResponse;
 import com.example.beprojectweb.dto.response.IntrospectResponse;
+import com.example.beprojectweb.entity.RefreshToken;
 import com.example.beprojectweb.entity.User;
 import com.example.beprojectweb.enums.Role;
 import com.example.beprojectweb.exception.AppException;
 import com.example.beprojectweb.exception.ErrorCode;
 import com.example.beprojectweb.mapper.UserMapper;
+import com.example.beprojectweb.repository.RefreshTokenRepository;
 import com.example.beprojectweb.repository.UserRepository;
 import com.nimbusds.jose.*;
 import com.nimbusds.jose.crypto.MACSigner;
@@ -38,14 +40,18 @@ import java.util.*;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class AuthenticationService {
     UserRepository userRepository;
+    RefreshTokenRepository refreshTokenRepository;
     PasswordEncoder passwordEncoder;
     UserMapper userMapper;
     EmailService emailService;
 
-
     @NonFinal
     @Value("${jwt.signerKey}")
     protected String signerKey;
+
+    @NonFinal
+    @Value("${jwt.refresh.expiry.days:7}")
+    protected int refreshTokenExpiryDays;
 
     public User createUser(UserCreationRequest request) {
         if (userRepository.existsUserByUsername(request.getUsername()))
@@ -81,12 +87,15 @@ public class AuthenticationService {
 
         //kiểm tra đăng nhập
         if(!authenticated)
-            throw new AppException(ErrorCode.UNATHENTICATIED);
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
         //sucess
-        var token = generateToken(user);
+        var accessToken = generateToken(user);
+        var refreshToken = generateRefreshToken();
+        saveRefreshToken(user, refreshToken);
 
         return AuthenticationResponse.builder()
-                .token(token)
+                .token(accessToken)
+                .refreshToken(refreshToken)
                 .authenticated(true)
                 .userResponse(userMapper.toUserResponse(user))
                 .build();
@@ -151,13 +160,58 @@ public class AuthenticationService {
 
     //bui scope từ 1 user
     private String buildScope(User user){
-        //scope đang là một 1 lisr , dùng StringJoiner để nối các scope bằng dấu " "
+        //scope đang là một 1 lisr , dùng StringJoiner đê̏ nối các scope bằng dấu " "
         StringJoiner stringJoiner = new StringJoiner(" "); // Oauth2 quy định scope phân cách nhau bằng " "
 
         //kiểm tra role
         if(!CollectionUtils.isEmpty(user.getRoles()))
             user.getRoles().forEach(stringJoiner::add);
         return stringJoiner.toString();
+    }
+
+    private String generateRefreshToken() {
+        return UUID.randomUUID().toString();
+    }
+
+    private void saveRefreshToken(User user, String refreshToken) {
+        RefreshToken tokenEntity = RefreshToken.builder()
+                .user(user)
+                .token(refreshToken)
+                .expiryDate(LocalDateTime.now().plusDays(refreshTokenExpiryDays))
+                .build();
+        refreshTokenRepository.save(tokenEntity);
+    }
+
+    public AuthenticationResponse refreshAccessToken(String refreshToken) {
+        RefreshToken stored = refreshTokenRepository.findByToken(refreshToken)
+                .orElseThrow(() -> new AppException(ErrorCode.UNAUTHENTICATED));
+
+        if (stored.isExpired()) {
+            refreshTokenRepository.delete(stored);
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+
+        User user = stored.getUser();
+        String newAccessToken = generateToken(user);
+        // Optionally rotate refresh token: delete old and create new
+        refreshTokenRepository.delete(stored);
+        String newRefreshToken = generateRefreshToken();
+        saveRefreshToken(user, newRefreshToken);
+
+        return AuthenticationResponse.builder()
+                .token(newAccessToken)
+                .refreshToken(newRefreshToken)
+                .authenticated(true)
+                .userResponse(userMapper.toUserResponse(user))
+                .build();
+    }
+
+    public void logout(String refreshToken) {
+        RefreshToken tokenEntity = refreshTokenRepository.findByToken(refreshToken)
+                .orElse(null);
+        if (tokenEntity != null) {
+            refreshTokenRepository.delete(tokenEntity);
+        }
     }
 
     public void verifyUser(VerifyUser request) {

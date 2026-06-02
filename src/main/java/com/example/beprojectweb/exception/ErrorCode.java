@@ -7,13 +7,12 @@ public enum ErrorCode {
     USERNAME_INVALID(1002, "Username must be at least 3 characters"),
     PASSWORD_INVALID(1003, "Password must be at least 3 characters"),
     USER_NOT_EXISTS(1004, "User not existed"),
-    UNATHENTICATIED(1005, "UNAUTHENTICATED"),
+    UNAUTHENTICATED(1005, "UNAUTHENTICATED"),
     CATEGORY_EXISTED(1006, "CATEGORY EXISTED"),
     EMAIL_INVALID(1007, "Email must be a valid Gmail address"),
     USER_NOT_ENABLED(1008, "Account is not activated. Please check your email"),
     INVALID_FILE_TYPE(1009, "Invalid File Type"),
-    INTERNAL_SERVER_ERROR(1010, "Internal Server Error"),
-    ;
+    INTERNAL_SERVER_ERROR(1010, "Internal Server Error");
 
     private int code;
     private String message;

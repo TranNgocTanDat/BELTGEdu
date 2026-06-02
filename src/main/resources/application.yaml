@@ -68,6 +68,9 @@ springdoc:
 
 jwt:
   signerKey: ${JWT_SIGNER_KEY}
+  refresh:
+    expiry:
+      days: 7
 
 logging:
   level:

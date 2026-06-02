@@ -2,6 +2,7 @@ package com.example.beprojectweb.controller;
 
 import com.example.beprojectweb.dto.request.AuthenticationRequest;
 import com.example.beprojectweb.dto.request.IntrospectRequest;
+import com.example.beprojectweb.dto.request.RefreshTokenRequest;
 import com.example.beprojectweb.dto.request.UserCreationRequest;
 import com.example.beprojectweb.dto.request.VerifyUser;
 import com.example.beprojectweb.dto.response.APIResponse;
@@ -71,5 +72,22 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/refresh")
+    public APIResponse<AuthenticationResponse> refreshToken(@RequestBody RefreshTokenRequest request) {
+        var result = authenticationService.refreshAccessToken(request.getRefreshToken());
+        return APIResponse.<AuthenticationResponse>builder()
+                .result(result)
+                .build();
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<?> logout(@RequestBody RefreshTokenRequest request) {
+        try {
+            authenticationService.logout(request.getRefreshToken());
+            return ResponseEntity.ok("Logged out successfully");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
 
 }
