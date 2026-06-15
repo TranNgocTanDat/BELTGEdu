@@ -14,7 +14,7 @@ public class WebConfig implements WebMvcConfigurer {
 
                 // Frontend Vite
                 .allowedOrigins("http://localhost:5173", "https://ltgedu.id.vn",
-                        "https://www.ltgedu.id.vn")
+                        "https://www.ltgedu.id.vn", "https://contact.ltg.edu.vn", "https://www.contact.ltg.edu.vn" )
 
 
                 // Cho phép tất cả method cần thiết
