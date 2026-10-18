@@ -1,18 +1,18 @@
-## build stage ##
+# Build stage: chạy trên GitHub Actions, không phải EC2
 FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
 
 WORKDIR /app
+
 COPY . .
-RUN mvn install -DskipTests=true
+RUN mvn -B clean package -DskipTests
 
-## run stage ##
-FROM alpine:3.19
+# Runtime stage: chỉ chứa Java runtime và file WAR
+FROM eclipse-temurin:21-jre
 
-RUN apk add openjdk21
+WORKDIR /app
 
-WORKDIR /run
-COPY --from=build /app/target/be-project-web-0.0.1-SNAPSHOT.war /run/be-project-web-0.0.1-SNAPSHOT.war
+COPY --from=build /app/target/*.war /app/app.war
 
-EXPOSE 5001
+EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "be-project-web-0.0.1-SNAPSHOT.war"]
+ENTRYPOINT ["java", "-Xms128m", "-Xmx256m", "-jar", "/app/app.war"]

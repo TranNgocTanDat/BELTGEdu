@@ -1,38 +1,52 @@
-version: "3.9"
-
 services:
   mysql:
     image: mysql:8.0
     container_name: mysql_db
-    restart: always
+    restart: unless-stopped
+
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE}
-    ports:
-      - "3305:3306"
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=30
+
     volumes:
       - mysql_data:/var/lib/mysql
 
-  backend:
-    build: .
-    # image: game/begame
-    restart: always
-    ports:
-      - "5001:8080"
-    environment:
-      - DB_URL=jdbc:mysql://mysql:3306/beltgedu
-      - DB_USERNAME=root
-      - DB_PASSWORD=Tandat1xxx
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - MAIL_USERNAME=${MAIL_USERNAME}
-      - MAIL_PASSWORD=${MAIL_PASSWORD}
-      - JWT_SIGNER_KEY=${JWT_SIGNER_KEY}
-    depends_on:
-      - mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
+  backend:
+    image: trandat123/beltgedu:latest
+    container_name: beltgedu_backend
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:5001:8080"
+
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE}
+      DB_USERNAME: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+      JWT_SIGNER_KEY: ${JWT_SIGNER_KEY}
+
+    depends_on:
+      mysql:
+        condition: service_healthy
 
 volumes:
   mysql_data:
-  certbot-ssl:
-  certbot-challenge:
