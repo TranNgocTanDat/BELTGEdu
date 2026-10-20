@@ -1,0 +1,150 @@
+package com.example.beprojectweb.service;
+
+import com.example.beprojectweb.dto.request.AnnouncementRequest;
+import com.example.beprojectweb.dto.response.AnnouncementResponse;
+import com.example.beprojectweb.entity.Announcement;
+import com.example.beprojectweb.entity.Registration;
+import com.example.beprojectweb.entity.School;
+import com.example.beprojectweb.entity.User;
+import com.example.beprojectweb.enums.Role;
+import com.example.beprojectweb.exception.AppException;
+import com.example.beprojectweb.exception.ErrorCode;
+import com.example.beprojectweb.repository.AnnouncementRepository;
+import com.example.beprojectweb.repository.RegistrationRepository;
+import com.example.beprojectweb.repository.SchoolRepository;
+import com.example.beprojectweb.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.DayOfWeek;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class AnnouncementService {
+    private final AnnouncementRepository announcementRepository;
+    private final RegistrationRepository registrationRepository;
+    private final SchoolRepository schoolRepository;
+    private final UserRepository userRepository;
+
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @Transactional(readOnly = true)
+    public List<AnnouncementResponse> getAnnouncements(UUID schoolId) {
+        User user = currentUser();
+        List<Announcement> items;
+        if (schoolId != null) {
+            School school = findSchool(schoolId);
+            assertSchoolAccess(user, school);
+            items = announcementRepository.findAllBySchool_IdOrderByWeekStartAsc(schoolId);
+        } else if (isAdmin(user)) {
+            items = announcementRepository.findAllByOrderByWeekStartAsc();
+        } else if (user.getRegion() != null) {
+            items = announcementRepository.findAllBySchool_Region_IdOrderByWeekStartAsc(user.getRegion().getId());
+        } else {
+            items = List.of();
+        }
+        return items.stream().map(this::toResponse).toList();
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @Transactional
+    public AnnouncementResponse mark(AnnouncementRequest request) {
+        User user = currentUser();
+        School school = findSchool(request.getSchoolId());
+        assertSchoolAccess(user, school);
+        assertMonday(request.getWeekStart());
+        UUID registrationId;
+        try {
+            registrationId = UUID.fromString(request.getRegistrationId().trim());
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "registrationId must be a valid UUID");
+        }
+        Registration registration = registrationRepository.findById(registrationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
+        if (!registration.getSchool().getId().equals(school.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Registration does not belong to the specified school");
+        }
+        String service = request.getService().toLowerCase(java.util.Locale.ROOT);
+        boolean enabled = service.equals("stem")
+                ? registration.getStemProgram() != null
+                : registration.getDigitalProgram() != null;
+        if (!enabled) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Registration does not have the requested program");
+        }
+        String key = registrationId + ":" + service + ":" + request.getWeekStart();
+        Announcement item = announcementRepository.findByKey(key).orElseGet(Announcement::new);
+        if (item.getSchool() != null && !item.getSchool().getId().equals(school.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This report key is already used by another school");
+        }
+        item.setKey(key);
+        item.setRegistrationId(registrationId.toString());
+        item.setService(service);
+        item.setWeekStart(request.getWeekStart());
+        item.setMessage(request.getMessage().trim());
+        item.setAnnouncedAt(LocalDateTime.now());
+        item.setSchool(school);
+        return toResponse(announcementRepository.save(item));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @Transactional
+    public void unmark(String key) {
+        User user = currentUser();
+        Announcement item = announcementRepository.findByKey(key)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Announcement not found"));
+        assertSchoolAccess(user, item.getSchool());
+        announcementRepository.delete(item);
+    }
+
+    private void assertMonday(java.time.LocalDate date) {
+        if (date.getDayOfWeek() != DayOfWeek.MONDAY) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "weekStart must be a Monday");
+        }
+    }
+
+    private School findSchool(UUID id) {
+        return schoolRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "School not found"));
+    }
+
+    private void assertSchoolAccess(User user, School school) {
+        if (isAdmin(user)) return;
+        UUID userRegion = user.getRegion() == null ? null : user.getRegion().getId();
+        if (userRegion == null || !userRegion.equals(school.getRegion().getId())) {
+            throw new AccessDeniedException("You can only manage announcements for schools in your region");
+        }
+    }
+
+    private User currentUser() {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTS));
+    }
+
+    private boolean isAdmin(User user) {
+        return user.getRoles() != null && user.getRoles().contains(Role.ADMIN.name());
+    }
+
+    private AnnouncementResponse toResponse(Announcement item) {
+        return AnnouncementResponse.builder()
+                .id(item.getId())
+                .key(item.getKey())
+                .schoolId(item.getSchool().getId())
+                .registrationId(item.getRegistrationId())
+                .service(item.getService())
+                .weekStart(item.getWeekStart())
+                .message(item.getMessage())
+                .announcedAt(item.getAnnouncedAt())
+                .build();
+    }
+}

@@ -40,4 +40,8 @@ public class User{
     @ElementCollection(fetch = FetchType.EAGER)
     Set<String> roles;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "region_id")
+    Region region;
+
 }

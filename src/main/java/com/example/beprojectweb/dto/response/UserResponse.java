@@ -4,7 +4,6 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Set;
 import java.util.UUID;
 
@@ -16,13 +15,12 @@ import java.util.UUID;
 public class UserResponse {
     UUID id;
     String username;
-    String password;
     String firstName;
     String lastName;
     String email;
-    String verificationCode;
-    LocalDateTime verificationCodeExpireAt;
     LocalDate dob;
     Set<String> roles;
+    UUID regionId;
+    String regionName;
 
 }

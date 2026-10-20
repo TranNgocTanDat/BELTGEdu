@@ -11,6 +11,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -23,6 +24,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -59,28 +61,42 @@ public class SecurityConfig {
                                 "/oauth2/**",
 
                                 "/categories/**",
-                                "/products/**",
-
-                                "/contacts/**"
+                                "/products/**"
                         ).permitAll()
 
-                        // USER
-                        .requestMatchers(
-                                HttpMethod.GET,
-                                "/users/myInfo"
-                        ).hasRole(Role.USER.name())
+                        // User access is additionally scoped by region in UserService.
+                        .requestMatchers(HttpMethod.GET, "/users/myInfo")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/users/me/update")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.GET, "/users", "/users/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.PATCH, "/users/**")
+                        .hasRole(Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.POST, "/users/**")
+                        .hasRole(Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.DELETE, "/users/**")
+                        .hasRole(Role.ADMIN.name())
 
-                        // ADMIN
-                        .requestMatchers(
-                                HttpMethod.GET,
-                                "/users",
-                                "/users/**"
-                        ).hasRole(Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.GET, "/schools", "/schools/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.POST, "/schools/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/schools/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.DELETE, "/schools/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
 
-                        .requestMatchers(
-                                HttpMethod.DELETE,
-                                "/users/**"
-                        ).hasRole(Role.ADMIN.name())
+                        .requestMatchers("/registrations/**", "/stem-plans/**", "/digital-plans/**", "/lesson-progress/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+
+                        .requestMatchers("/announcements/**", "/school-closures/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+
+                        // Users can read their assigned region; only administrators can manage regions.
+                        .requestMatchers(HttpMethod.GET, "/regions", "/regions/**")
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .requestMatchers("/regions/**").hasRole(Role.ADMIN.name())
 
                         // GAME KEY
                         .requestMatchers(
@@ -164,3 +180,5 @@ public class SecurityConfig {
                 .build();
     }
 }
+
+

@@ -1,0 +1,4 @@
+package com.example.beprojectweb.entity;
+import jakarta.persistence.*; import lombok.*; import lombok.experimental.FieldDefaults; import java.time.LocalDate; import java.util.UUID;
+@Entity @Table(name="lesson_progress",uniqueConstraints=@UniqueConstraint(name="uk_lesson_progress_key",columnNames={"plan_type","plan_item_id","lesson_id"})) @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder @FieldDefaults(level=AccessLevel.PRIVATE)
+public class LessonProgress { @Id @GeneratedValue(strategy=GenerationType.UUID) UUID id; @Column(name="plan_type",nullable=false,length=10) String planType; @Column(name="plan_item_id",nullable=false) UUID planItemId; @Column(name="lesson_id",nullable=false,length=100) String lessonId; @Column(nullable=false,length=10) String status; @Column(name="completed_date") LocalDate date; }

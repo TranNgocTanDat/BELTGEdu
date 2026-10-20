@@ -13,8 +13,7 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/**")
 
                 // Frontend Vite
-                .allowedOrigins("http://localhost:5173", "https://ltgedu.id.vn",
-                        "https://www.ltgedu.id.vn", "https://contact.ltg.edu.vn", "https://www.contact.ltg.edu.vn" )
+                .allowedOrigins("http://localhost:5173", "https://stem-manager-school.vercel.app")
 
 
                 // Cho phép tất cả method cần thiết

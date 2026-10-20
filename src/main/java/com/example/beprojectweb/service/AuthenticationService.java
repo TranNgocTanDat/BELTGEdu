@@ -108,7 +108,7 @@ public class AuthenticationService {
 
         //create Payload
         //claim
-        JWTClaimsSet jwtClaimsSet = new JWTClaimsSet.Builder()
+        JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
                 .subject(user.getUsername()) //user login
                 .issuer("beproject")
                 .issueTime(new Date()) //thời gian tạo token
@@ -117,8 +117,9 @@ public class AuthenticationService {
                 ))
                 //tạo 1 claim chứa scope nhận biết user or admin
                 //tạo 1 hàm build scope bên dưới
-                .claim("scope", buildScope(user))
-                .build();
+                .claim("scope", buildScope(user));
+        if (user.getRegion() != null) claims.claim("regionId", user.getRegion().getId().toString());
+        JWTClaimsSet jwtClaimsSet = claims.build();
 
         //Payload
         Payload payload = new Payload(jwtClaimsSet.toJSONObject());

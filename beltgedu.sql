@@ -16,37 +16,112 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
--- Table structure for table `contact`
+-- Table structure for table `regions`
 --
 
-DROP TABLE IF EXISTS `contact`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `contact` (
-  `id` varchar(255) NOT NULL,
-  `created_at` datetime(6) DEFAULT NULL,
-  `email` varchar(255) DEFAULT NULL,
-  `is_read` bit(1) NOT NULL,
-  `message` varchar(255) DEFAULT NULL,
-  `name` varchar(255) DEFAULT NULL,
-  `organization` varchar(255) DEFAULT NULL,
-  `phone` varchar(255) DEFAULT NULL,
-  `subject` varchar(255) DEFAULT NULL,
+DROP TABLE IF EXISTS `regions`;
+CREATE TABLE `regions` (
+  `id` binary(16) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_regions_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Table structure for table `schools`
+--
+
+DROP TABLE IF EXISTS `schools`;
+CREATE TABLE `schools` (
+  `id` binary(16) NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `code` varchar(40) NOT NULL,
+  `address` varchar(500) DEFAULT NULL,
+  `contact_name` varchar(150) DEFAULT NULL,
+  `phone` varchar(40) DEFAULT NULL,
+  `level` varchar(20) NOT NULL,
+  `created_at` date NOT NULL,
+  `region_id` binary(16) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_schools_code` (`code`),
+  KEY `idx_schools_region` (`region_id`),
+  CONSTRAINT `fk_schools_region` FOREIGN KEY (`region_id`) REFERENCES `regions` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Table structure for table `announcements`
+--
+
+DROP TABLE IF EXISTS `announcements`;
+CREATE TABLE `announcements` (
+  `id` binary(16) NOT NULL,
+  `announcement_key` varchar(220) NOT NULL,
+  `registration_id` varchar(100) NOT NULL,
+  `service` varchar(16) NOT NULL,
+  `week_start` date NOT NULL,
+  `message` text NOT NULL,
+  `announced_at` datetime(6) NOT NULL,
+  `school_id` binary(16) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_announcement_key` (`announcement_key`),
+  KEY `idx_announcements_school_week` (`school_id`,`week_start`),
+  CONSTRAINT `fk_announcements_school` FOREIGN KEY (`school_id`) REFERENCES `schools` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Table structure for table `school_closures`
+--
+
+DROP TABLE IF EXISTS `school_closures`;
+CREATE TABLE `school_closures` (
+  `id` binary(16) NOT NULL,
+  `school_id` binary(16) NOT NULL,
+  `week_start` date NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_school_closure_week` (`school_id`,`week_start`),
+  CONSTRAINT `fk_school_closures_school` FOREIGN KEY (`school_id`) REFERENCES `schools` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Table structure for table `stem_courses`
+--
+
+DROP TABLE IF EXISTS `stem_lessons`;
+DROP TABLE IF EXISTS `stem_courses`;
+CREATE TABLE `stem_courses` (
+  `id` varchar(80) NOT NULL,
+  `code` varchar(40) NOT NULL,
+  `program` varchar(16) NOT NULL,
+  `subject` varchar(24) NOT NULL,
+  `grade` int DEFAULT NULL,
+  `module` int DEFAULT NULL,
+  `part` int NOT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Dumping data for table `contact`
+-- Table structure for table `stem_lessons`
 --
 
-LOCK TABLES `contact` WRITE;
-/*!40000 ALTER TABLE `contact` DISABLE KEYS */;
-INSERT INTO `contact` VALUES ('07780d37-e554-4aae-a298-82758c7b0d31','2026-05-29 15:48:07.478637','21130314@st.hcmuaf.edu.vn',_binary '\0','ádasdáaada','Trần Ngọc Tấn Đạt','ltg','0911370781','course'),('08278489-516e-4dca-955f-163b8f514341','2026-05-29 13:57:57.680928','email1@example.com',_binary '\0','Nội dung tin nhắn','Tan Dat test','LTG','0911370781','Chủ đề'),('6bb49578-c4e7-4f6a-829d-aa07dc68e7da','2026-05-29 15:52:44.311301','ad@gmail.com',_binary '\0','fsdaaaaaaaa','Tádd','ád','0911370781','course'),('95a26a21-5af4-457f-b9f0-b1ff3451e377','2026-05-29 13:52:29.085473','email1@example.com',_binary '\0','Nội dung tin nhắn','Tan Dat test',NULL,NULL,'Chủ đề');
-/*!40000 ALTER TABLE `contact` ENABLE KEYS */;
-UNLOCK TABLES;
+CREATE TABLE `stem_lessons` (
+  `id` varchar(100) NOT NULL,
+  `course_id` varchar(80) NOT NULL,
+  `lesson_order` int NOT NULL,
+  `title` varchar(500) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_stem_lesson_order` (`course_id`,`lesson_order`),
+  CONSTRAINT `fk_stem_lessons_course` FOREIGN KEY (`course_id`) REFERENCES `stem_courses` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- Table structure for table `digital_lessons`
 --
+
+CREATE TABLE `digital_lessons` (
+  `id` varchar(100) NOT NULL,
+  `program` varchar(16) NOT NULL,
+  `grade` int NOT NULL,
+  `lesson_order` int NOT NULL,
+  `title` varchar(500) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_digital_lesson_position` (`program`,`grade`,`lesson_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 -- Table structure for table `user`
 --
 
@@ -64,7 +139,10 @@ CREATE TABLE `user` (
   `username` varchar(255) DEFAULT NULL,
   `verification_code` varchar(255) DEFAULT NULL,
   `verification_expiration` datetime(6) DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  `region_id` binary(16) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_region` (`region_id`),
+  CONSTRAINT `fk_user_region` FOREIGN KEY (`region_id`) REFERENCES `regions` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -74,7 +152,7 @@ CREATE TABLE `user` (
 
 LOCK TABLES `user` WRITE;
 /*!40000 ALTER TABLE `user` DISABLE KEYS */;
-INSERT INTO `user` VALUES (_binary 'Od/�*@\�3�\�Ⱦy�',NULL,'admin@ltg.edu.vn',_binary '',NULL,NULL,'$2a$10$61eiFuj98ezOlFIpIQxPruAljFYiu8FX9U6faumRHe.BGcpmExxYS','LTG Education',NULL,NULL);
+INSERT INTO `user` VALUES (_binary 'Od/�*@\�3�\�Ⱦy�',NULL,'admin@ltg.edu.vn',_binary '',NULL,NULL,'$2a$10$61eiFuj98ezOlFIpIQxPruAljFYiu8FX9U6faumRHe.BGcpmExxYS','LTG Education',NULL,NULL,NULL);
 /*!40000 ALTER TABLE `user` ENABLE KEYS */;
 UNLOCK TABLES;
 

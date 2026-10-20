@@ -8,9 +8,9 @@ import com.example.beprojectweb.dto.request.VerifyUser;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.response.AuthenticationResponse;
 import com.example.beprojectweb.dto.response.IntrospectResponse;
-import com.example.beprojectweb.entity.User;
+import com.example.beprojectweb.dto.response.UserResponse;
+import com.example.beprojectweb.mapper.UserMapper;
 import com.example.beprojectweb.service.AuthenticationService;
-import com.example.beprojectweb.service.UserService;
 import com.nimbusds.jose.JOSEException;
 import jakarta.validation.Valid;
 import lombok.AccessLevel;
@@ -27,13 +27,13 @@ import java.text.ParseException;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class AuthController {
     AuthenticationService authenticationService;
-    UserService userService;
+    UserMapper userMapper;
 
     @PostMapping("/signup")
-    APIResponse<User> createUser(@RequestBody @Valid UserCreationRequest request) {
-        APIResponse apiResponse = new APIResponse();
-        apiResponse.setResult(authenticationService.createUser(request));
-        return apiResponse;
+    APIResponse<UserResponse> createUser(@RequestBody @Valid UserCreationRequest request) {
+        return APIResponse.<UserResponse>builder()
+                .result(userMapper.toUserResponse(authenticationService.createUser(request)))
+                .build();
     }
     //Tạo endpoint login
     @PostMapping("/login")

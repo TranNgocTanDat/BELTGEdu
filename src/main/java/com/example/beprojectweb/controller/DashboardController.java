@@ -1,0 +1,3 @@
+package com.example.beprojectweb.controller;
+import com.example.beprojectweb.dto.response.APIResponse; import com.example.beprojectweb.dto.response.DashboardSummaryResponse; import com.example.beprojectweb.service.DashboardService; import lombok.RequiredArgsConstructor; import org.springframework.web.bind.annotation.*;
+@RestController @RequestMapping("/dashboard") @RequiredArgsConstructor public class DashboardController {private final DashboardService service; @GetMapping("/summary") public APIResponse<DashboardSummaryResponse> summary(){return APIResponse.<DashboardSummaryResponse>builder().result(service.summary()).build();}}
