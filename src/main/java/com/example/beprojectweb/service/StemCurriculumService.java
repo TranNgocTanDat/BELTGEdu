@@ -76,6 +76,10 @@ public class StemCurriculumService {
     @PreAuthorize("hasRole('ADMIN')")
     @Transactional
     public StemCourseResponse createCourse(StemCourseRequest request) {
+        String code = request.getCode().trim();
+        if (courseRepository.existsByProgramAndCodeIgnoreCase(request.getProgram(), code)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Mã khóa học đã tồn tại trong chương trình này");
+        }
         StemCourse course = courseFrom(request, new StemCourse());
         course.setId(UUID.randomUUID().toString());
         course = courseRepository.save(course);
@@ -87,6 +91,10 @@ public class StemCurriculumService {
     public StemCourseResponse updateCourse(String id, StemCourseRequest request) {
         StemCourse course = courseRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM course not found"));
+        String code = request.getCode().trim();
+        if (courseRepository.existsByProgramAndCodeIgnoreCaseAndIdNot(request.getProgram(), code, id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Mã khóa học đã tồn tại trong chương trình này");
+        }
         course = courseFrom(request, course);
         course = courseRepository.save(course);
         return toCourseResponse(course, lessonRepository.findAllByCourse_IdOrderByLessonOrderAsc(id).stream()
