@@ -23,8 +23,10 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.UUID;
 
@@ -119,16 +121,26 @@ public class StemCurriculumService {
 
     @PreAuthorize("hasRole('ADMIN')")
     @Transactional
-    public StemLessonResponse createLesson(String courseId, StemLessonCreateRequest request) {
+    public List<StemLessonResponse> createLessons(String courseId, List<StemLessonCreateRequest> requests) {
         StemCourse course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM course not found"));
-        if (lessonRepository.existsByCourse_IdAndLessonOrder(courseId, request.getOrder())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Vị trí bài học đã được sử dụng trong khóa này.");
+        Set<Integer> requestedOrders = new HashSet<>();
+        for (StemLessonCreateRequest request : requests) {
+            if (!requestedOrders.add(request.getOrder())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Vị trí bài học " + request.getOrder() + " bị trùng trong danh sách gửi lên.");
+            }
+            if (lessonRepository.existsByCourse_IdAndLessonOrder(courseId, request.getOrder())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Vị trí bài học " + request.getOrder() + " đã được sử dụng trong khóa này.");
+            }
         }
-        StemLesson lesson = StemLesson.builder().id(UUID.randomUUID().toString()).course(course)
+        List<StemLesson> lessons = requests.stream().map(request -> StemLesson.builder()
+                .id(UUID.randomUUID().toString()).course(course)
                 .lessonOrder(request.getOrder()).title(request.getTitle().trim())
-                .note(normalizeOptional(request.getNote())).driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build();
-        return toLessonResponse(lessonRepository.save(lesson));
+                .note(normalizeOptional(request.getNote())).driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build())
+                .toList();
+        return lessonRepository.saveAll(lessons).stream().map(this::toLessonResponse).toList();
     }
 
     @PreAuthorize("hasRole('ADMIN')")

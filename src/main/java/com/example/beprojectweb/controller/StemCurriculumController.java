@@ -5,6 +5,7 @@ import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.StemCourseRequest;
 import com.example.beprojectweb.dto.request.StemLessonCreateRequest;
 import com.example.beprojectweb.dto.response.StemCourseResponse;
+import com.example.beprojectweb.dto.response.StemLessonResponse;
 import com.example.beprojectweb.enums.StemProgram;
 import com.example.beprojectweb.enums.StemSubject;
 import com.example.beprojectweb.service.StemCurriculumService;
@@ -57,10 +58,11 @@ public class StemCurriculumController {
     }
 
     @PostMapping("/courses/{courseId}/lessons")
-    public APIResponse<com.example.beprojectweb.dto.response.StemLessonResponse> createLesson(@PathVariable String courseId,
-            @RequestBody @jakarta.validation.Valid StemLessonCreateRequest request) {
-        return APIResponse.<com.example.beprojectweb.dto.response.StemLessonResponse>builder()
-                .result(curriculumService.createLesson(courseId, request)).build();
+    public APIResponse<List<StemLessonResponse>> createLessons(@PathVariable String courseId,
+            @RequestBody @jakarta.validation.Valid @jakarta.validation.constraints.NotEmpty
+            @jakarta.validation.constraints.Size(max = 100) List<@jakarta.validation.Valid StemLessonCreateRequest> requests) {
+        return APIResponse.<List<StemLessonResponse>>builder()
+                .result(curriculumService.createLessons(courseId, requests)).build();
     }
 
     @DeleteMapping("/lessons/{id}")
