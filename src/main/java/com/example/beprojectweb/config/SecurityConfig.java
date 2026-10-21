@@ -73,6 +73,8 @@ public class SecurityConfig {
                         .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
                         .requestMatchers(HttpMethod.PATCH, "/users/**")
                         .hasRole(Role.ADMIN.name())
+                        .requestMatchers(HttpMethod.PUT, "/users/**")
+                        .hasRole(Role.ADMIN.name())
                         .requestMatchers(HttpMethod.POST, "/users/**")
                         .hasRole(Role.ADMIN.name())
                         .requestMatchers(HttpMethod.DELETE, "/users/**")

@@ -1,6 +1,7 @@
 package com.example.beprojectweb.controller;
 
 import com.example.beprojectweb.dto.request.UserAccessUpdateRequest;
+import com.example.beprojectweb.dto.request.AdminUserUpdateRequest;
 import com.example.beprojectweb.dto.request.UserUpdateRequest;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.response.UserResponse;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -52,6 +54,17 @@ public class UserController {
     public APIResponse<UserResponse> updateAccess(@PathVariable UUID userId,
                                                    @RequestBody @Valid UserAccessUpdateRequest request) {
         return APIResponse.<UserResponse>builder().result(userService.updateAccess(userId, request)).build();
+    }
+
+    @PutMapping("/{userId}")
+    public APIResponse<UserResponse> updateUserByAdmin(@PathVariable UUID userId,
+                                                        @RequestBody @Valid AdminUserUpdateRequest request) {
+        return APIResponse.<UserResponse>builder().result(userService.updateUserByAdmin(userId, request)).build();
+    }
+
+    @PostMapping("/{userId}/activate")
+    public APIResponse<UserResponse> activateUser(@PathVariable UUID userId) {
+        return APIResponse.<UserResponse>builder().result(userService.activateUser(userId)).build();
     }
 
     @DeleteMapping("/{userId}")

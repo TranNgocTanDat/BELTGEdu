@@ -1,6 +1,7 @@
 package com.example.beprojectweb.service;
 
 import com.example.beprojectweb.dto.request.UserAccessUpdateRequest;
+import com.example.beprojectweb.dto.request.AdminUserUpdateRequest;
 import com.example.beprojectweb.dto.request.UserUpdateRequest;
 import com.example.beprojectweb.dto.response.UserResponse;
 import com.example.beprojectweb.entity.Region;
@@ -11,6 +12,7 @@ import com.example.beprojectweb.exception.ErrorCode;
 import com.example.beprojectweb.mapper.UserMapper;
 import com.example.beprojectweb.repository.RegionRepository;
 import com.example.beprojectweb.repository.UserRepository;
+import com.example.beprojectweb.repository.RefreshTokenRepository;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -31,6 +33,7 @@ import java.util.UUID;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 public class UserService {
     UserRepository userRepository;
+    RefreshTokenRepository refreshTokenRepository;
     RegionRepository regionRepository;
     UserMapper userMapper;
 
@@ -90,8 +93,57 @@ public class UserService {
     }
 
     @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public UserResponse updateUserByAdmin(UUID userId, AdminUserUpdateRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTS));
+        String username = request.getUsername().trim();
+        String email = request.getEmail().trim();
+        if (userRepository.existsByUsernameAndIdNot(username, userId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Tên tài khoản đã được sử dụng");
+        }
+        if (userRepository.existsByEmailAndIdNot(email, userId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email đã được sử dụng");
+        }
+        Region region = null;
+        if (request.getRole() == Role.USER) {
+            if (request.getRegionId() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "USER accounts must be assigned to a region");
+            }
+            region = regionRepository.findById(request.getRegionId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Region not found"));
+        }
+        user.setUsername(username);
+        user.setEmail(email);
+        user.setFirstName(request.getFirstName() == null ? null : request.getFirstName().trim());
+        user.setLastName(request.getLastName() == null ? null : request.getLastName().trim());
+        user.setDob(request.getDob());
+        user.setRoles(new HashSet<>(List.of(request.getRole().name())));
+        user.setRegion(region);
+        return userMapper.toUserResponse(userRepository.save(user));
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public UserResponse activateUser(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTS));
+        user.setEnabled(true);
+        user.setVerificationCode(null);
+        user.setVerificationCodeExpiredAt(null);
+        return userMapper.toUserResponse(userRepository.save(user));
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
     public void deleteUser(UUID userId) {
-        userRepository.deleteById(userId);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTS));
+        if (user.getId().equals(currentUser().getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Không thể xóa tài khoản đang đăng nhập");
+        }
+        refreshTokenRepository.deleteAllByUser_Id(userId);
+        userRepository.delete(user);
     }
 
     private User currentUser() {
