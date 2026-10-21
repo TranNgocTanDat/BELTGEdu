@@ -8,4 +8,8 @@ import lombok.Data;
 public class LessonTitleRequest {
     @NotBlank @Size(max = 500)
     private String title;
+    @Size(max = 2000)
+    private String note;
+    @Size(max = 2048)
+    private String driveImageUrl;
 }

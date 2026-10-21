@@ -18,4 +18,8 @@ public class DigitalLessonCreateRequest {
     private Integer order;
     @NotBlank @Size(max = 500)
     private String title;
+    @Size(max = 2000)
+    private String note;
+    @Size(max = 2048)
+    private String driveImageUrl;
 }

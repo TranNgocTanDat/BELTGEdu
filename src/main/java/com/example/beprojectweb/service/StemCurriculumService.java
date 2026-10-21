@@ -67,6 +67,8 @@ public class StemCurriculumService {
         StemLesson lesson = lessonRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM lesson not found"));
         lesson.setTitle(request.getTitle().trim());
+        if (request.getNote() != null) lesson.setNote(normalizeOptional(request.getNote()));
+        if (request.getDriveImageUrl() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrl()));
         lesson = lessonRepository.save(lesson);
         return toLessonResponse(lesson);
     }
@@ -116,7 +118,8 @@ public class StemCurriculumService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Vị trí bài học đã được sử dụng trong khóa này.");
         }
         StemLesson lesson = StemLesson.builder().id(UUID.randomUUID().toString()).course(course)
-                .lessonOrder(request.getOrder()).title(request.getTitle().trim()).build();
+                .lessonOrder(request.getOrder()).title(request.getTitle().trim())
+                .note(normalizeOptional(request.getNote())).driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build();
         return toLessonResponse(lessonRepository.save(lesson));
     }
 
@@ -159,6 +162,12 @@ public class StemCurriculumService {
                 .id(lesson.getId())
                 .order(lesson.getLessonOrder())
                 .title(lesson.getTitle())
+                .note(lesson.getNote())
+                .driveImageUrl(lesson.getDriveImageUrl())
                 .build();
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

@@ -39,4 +39,10 @@ public class StemLesson {
 
     @Column(nullable = false, length = 500)
     String title;
+
+    @Column(length = 2000)
+    String note;
+
+    @Column(name = "drive_image_url", length = 2048)
+    String driveImageUrl;
 }

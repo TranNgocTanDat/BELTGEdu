@@ -46,6 +46,8 @@ public class DigitalCurriculumService {
         DigitalLesson lesson = lessonRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Digital lesson not found"));
         lesson.setTitle(request.getTitle().trim());
+        if (request.getNote() != null) lesson.setNote(normalizeOptional(request.getNote()));
+        if (request.getDriveImageUrl() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrl()));
         lesson = lessonRepository.save(lesson);
         return toResponse(lesson);
     }
@@ -58,7 +60,8 @@ public class DigitalCurriculumService {
         }
         DigitalLesson lesson = DigitalLesson.builder().id(java.util.UUID.randomUUID().toString())
                 .program(request.getProgram()).grade(request.getGrade()).lessonOrder(request.getOrder())
-                .title(request.getTitle().trim()).build();
+                .title(request.getTitle().trim()).note(normalizeOptional(request.getNote()))
+                .driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build();
         return toResponse(lessonRepository.save(lesson));
     }
 
@@ -73,6 +76,8 @@ public class DigitalCurriculumService {
         }
         lesson.setLessonOrder(request.getOrder());
         lesson.setTitle(request.getTitle().trim());
+        if (request.getNote() != null) lesson.setNote(normalizeOptional(request.getNote()));
+        if (request.getDriveImageUrl() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrl()));
         return toResponse(lessonRepository.save(lesson));
     }
 
@@ -94,6 +99,12 @@ public class DigitalCurriculumService {
                 .grade(lesson.getGrade())
                 .order(lesson.getLessonOrder())
                 .title(lesson.getTitle())
+                .note(lesson.getNote())
+                .driveImageUrl(lesson.getDriveImageUrl())
                 .build();
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

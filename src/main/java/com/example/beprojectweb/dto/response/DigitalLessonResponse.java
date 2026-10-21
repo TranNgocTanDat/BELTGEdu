@@ -16,4 +16,6 @@ public class DigitalLessonResponse {
     private Integer grade;
     private Integer order;
     private String title;
+    private String note;
+    private String driveImageUrl;
 }
