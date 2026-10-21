@@ -8,6 +8,8 @@ import java.util.UUID;
 
 public interface SchoolRepository extends JpaRepository<School, UUID> {
     List<School> findAllByRegion_Id(UUID regionId);
+    List<School> findAllByOrderByCodeAsc();
+    List<School> findAllByRegion_IdOrderByCodeAsc(UUID regionId);
     boolean existsByRegion_Id(UUID regionId);
     boolean existsByCodeIgnoreCase(String code);
     boolean existsByCodeIgnoreCaseAndIdNot(String code, UUID id);

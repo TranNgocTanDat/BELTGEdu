@@ -45,8 +45,8 @@ public class SchoolService {
     public List<SchoolResponse> getSchools() {
         User user = currentUser();
         List<School> schools = isAdmin(user)
-                ? schoolRepository.findAll()
-                : user.getRegion() == null ? List.of() : schoolRepository.findAllByRegion_Id(user.getRegion().getId());
+                ? schoolRepository.findAllByOrderByCodeAsc()
+                : user.getRegion() == null ? List.of() : schoolRepository.findAllByRegion_IdOrderByCodeAsc(user.getRegion().getId());
         return schools.stream().map(this::toResponse).toList();
     }
 
