@@ -43,22 +43,15 @@ public class StemCurriculumService {
         if (grade != null && (grade < 1 || grade > 12)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "grade must be between 1 and 12");
         }
+        List<StemCourse> courses = courseRepository.findCatalog(program, subject, grade);
+        if (courses.isEmpty()) return List.of();
+        List<String> courseIds = courses.stream().map(StemCourse::getId).toList();
         Map<String, List<StemLessonResponse>> lessonsByCourse = lessonRepository
-                .findAllByOrderByCourse_IdAscLessonOrderAsc().stream()
+                .findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(courseIds).stream()
                 .collect(Collectors.groupingBy(lesson -> lesson.getCourse().getId(), HashMap::new,
                         Collectors.mapping(this::toLessonResponse, Collectors.toList())));
 
-        List<StemCourse> courses = new ArrayList<>(courseRepository.findAll());
-        courses.sort(Comparator.comparing((StemCourse c) -> c.getProgram().name())
-                .thenComparing(c -> c.getSubject().name())
-                .thenComparing(StemCourse::getGrade, Comparator.nullsFirst(Integer::compareTo))
-                .thenComparing(StemCourse::getModule, Comparator.nullsFirst(Integer::compareTo))
-                .thenComparing(StemCourse::getPart));
-
         return courses.stream()
-                .filter(course -> program == null || course.getProgram() == program)
-                .filter(course -> subject == null || course.getSubject() == subject)
-                .filter(course -> grade == null || course.getGrade() == null || course.getGrade().equals(grade))
                 .map(course -> toCourseResponse(course, lessonsByCourse.getOrDefault(course.getId(), List.of())))
                 .toList();
     }
