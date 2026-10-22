@@ -4,9 +4,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -28,4 +30,8 @@ public class AnnouncementRequest {
     @NotBlank
     @Size(max = 10000)
     private String message;
+
+    @Valid
+    @Size(max = 200)
+    private List<LessonProgressRequest> progress;
 }

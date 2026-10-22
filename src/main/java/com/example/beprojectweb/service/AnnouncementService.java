@@ -1,17 +1,27 @@
 package com.example.beprojectweb.service;
 
 import com.example.beprojectweb.dto.request.AnnouncementRequest;
+import com.example.beprojectweb.dto.request.AnnouncementProgressBatchRequest;
+import com.example.beprojectweb.dto.request.LessonProgressRequest;
 import com.example.beprojectweb.dto.response.AnnouncementResponse;
 import com.example.beprojectweb.entity.Announcement;
+import com.example.beprojectweb.entity.DigitalPlan;
+import com.example.beprojectweb.entity.LessonProgress;
 import com.example.beprojectweb.entity.Registration;
 import com.example.beprojectweb.entity.School;
+import com.example.beprojectweb.entity.StemPlan;
 import com.example.beprojectweb.entity.User;
 import com.example.beprojectweb.enums.Role;
 import com.example.beprojectweb.exception.AppException;
 import com.example.beprojectweb.exception.ErrorCode;
 import com.example.beprojectweb.repository.AnnouncementRepository;
+import com.example.beprojectweb.repository.DigitalLessonRepository;
+import com.example.beprojectweb.repository.DigitalPlanRepository;
+import com.example.beprojectweb.repository.LessonProgressRepository;
 import com.example.beprojectweb.repository.RegistrationRepository;
 import com.example.beprojectweb.repository.SchoolRepository;
+import com.example.beprojectweb.repository.StemLessonRepository;
+import com.example.beprojectweb.repository.StemPlanRepository;
 import com.example.beprojectweb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,7 +34,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.DayOfWeek;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -34,6 +46,11 @@ public class AnnouncementService {
     private final RegistrationRepository registrationRepository;
     private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
+    private final StemPlanRepository stemPlanRepository;
+    private final DigitalPlanRepository digitalPlanRepository;
+    private final StemLessonRepository stemLessonRepository;
+    private final DigitalLessonRepository digitalLessonRepository;
+    private final LessonProgressRepository lessonProgressRepository;
 
     @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
     @Transactional(readOnly = true)
@@ -74,6 +91,9 @@ public class AnnouncementService {
                     "Registration does not belong to the specified school");
         }
         String service = request.getService().toLowerCase(java.util.Locale.ROOT);
+        if (request.getProgress() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "progress is required to mark an announcement");
+        }
         boolean enabled = service.equals("stem")
                 ? registration.getStemProgram() != null
                 : registration.getDigitalProgram() != null;
@@ -93,17 +113,71 @@ public class AnnouncementService {
         item.setMessage(request.getMessage().trim());
         item.setAnnouncedAt(LocalDateTime.now());
         item.setSchool(school);
+        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE");
         return toResponse(announcementRepository.save(item));
     }
 
     @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
     @Transactional
-    public void unmark(String key) {
+    public void unmark(String key, AnnouncementProgressBatchRequest request) {
         User user = currentUser();
         Announcement item = announcementRepository.findByKey(key)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Announcement not found"));
         assertSchoolAccess(user, item.getSchool());
+        if (request == null || request.getProgress() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "progress is required to unmark an announcement");
+        }
+        UUID registrationId = UUID.fromString(item.getRegistrationId());
+        Registration registration = registrationRepository.findById(registrationId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
+        validateAndUpdateProgress(registration, item.getService(), request == null ? null : request.getProgress(), "TODO");
         announcementRepository.delete(item);
+    }
+
+    private void validateAndUpdateProgress(Registration registration, String service,
+                                           List<LessonProgressRequest> targets, String status) {
+        String expectedType = service.equalsIgnoreCase("stem") ? "STEM" : "DIGITAL";
+        List<LessonProgressRequest> safeTargets = targets;
+        for (LessonProgressRequest target : safeTargets) {
+            if (target == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lesson progress target");
+            }
+            String type = target.getPlanType() == null ? "" : target.getPlanType().toUpperCase(Locale.ROOT);
+            if (!expectedType.equals(type) || target.getPlanItemId() == null || target.getLessonId() == null || target.getLessonId().isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lesson progress target");
+            }
+            if (expectedType.equals("STEM")) {
+                StemPlan plan = stemPlanRepository.findById(target.getPlanItemId())
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found"));
+                if (!plan.getRegistration().getId().equals(registration.getId())
+                        || !stemLessonRepository.existsByIdAndCourse_Id(target.getLessonId(), plan.getCourse().getId())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lesson does not belong to this registration plan");
+                }
+            } else {
+                DigitalPlan plan = digitalPlanRepository.findById(target.getPlanItemId())
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Digital plan not found"));
+                if (!plan.getRegistration().getId().equals(registration.getId())
+                        || registration.getDigitalProgram() == null
+                        || !digitalLessonRepository.existsByIdAndProgramAndGrade(target.getLessonId(), registration.getDigitalProgram(), plan.getGrade())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lesson does not belong to this registration plan");
+                }
+            }
+        }
+        for (LessonProgressRequest target : safeTargets) {
+            String type = expectedType;
+            if (status.equals("TODO")) {
+                lessonProgressRepository.deleteByPlanTypeAndPlanItemIdAndLessonId(type, target.getPlanItemId(), target.getLessonId());
+            } else {
+                LessonProgress progress = lessonProgressRepository.findByPlanTypeAndPlanItemIdAndLessonId(type, target.getPlanItemId(), target.getLessonId())
+                        .orElseGet(LessonProgress::new);
+                progress.setPlanType(type);
+                progress.setPlanItemId(target.getPlanItemId());
+                progress.setLessonId(target.getLessonId());
+                progress.setStatus(status);
+                progress.setDate(LocalDate.now());
+                lessonProgressRepository.save(progress);
+            }
+        }
     }
 
     private void assertMonday(java.time.LocalDate date) {

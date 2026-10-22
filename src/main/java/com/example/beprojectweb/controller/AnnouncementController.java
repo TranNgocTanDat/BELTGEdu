@@ -1,6 +1,7 @@
 package com.example.beprojectweb.controller;
 
 import com.example.beprojectweb.dto.request.AnnouncementRequest;
+import com.example.beprojectweb.dto.request.AnnouncementProgressBatchRequest;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.response.AnnouncementResponse;
 import com.example.beprojectweb.service.AnnouncementService;
@@ -37,8 +38,8 @@ public class AnnouncementController {
     }
 
     @DeleteMapping("/{key}")
-    public APIResponse<Void> unmark(@PathVariable String key) {
-        announcementService.unmark(key);
+    public APIResponse<Void> unmark(@PathVariable String key, @RequestBody(required = false) @Valid AnnouncementProgressBatchRequest request) {
+        announcementService.unmark(key, request);
         return APIResponse.<Void>builder().build();
     }
 }
