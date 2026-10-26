@@ -87,7 +87,7 @@ public class ReportExcelService {
         List<ReportWork> allWork = workRepository.findAllByOrderByPeriodDescTitleAsc();
         List<ReportWork> work = allWork.stream()
                 .filter(row -> dateRange ? overlaps(row, startDate, endDate) : inPeriod(row.getPeriod(), reportPeriod))
-                .filter(row -> hasAdminDeadlineCorrection(row) || row.getCreatedAt() == null || !row.getCreatedAt().toLocalDate().isAfter(asOf))
+                .filter(row -> hasAdminDeadlineCorrection(row) || isCompletedBy(row, asOf) || row.getCreatedAt() == null || !row.getCreatedAt().toLocalDate().isAfter(asOf))
                 .toList();
         List<ReportKpi> kpis = kpiRepository.findAllByOrderByPeriodDescKpiKeyAsc().stream()
                 .filter(row -> dateRange ? periodTouchesRange(row.getPeriod(), startDate, endDate) : inPeriod(row.getPeriod(), reportPeriod)).toList();
@@ -232,7 +232,8 @@ public class ReportExcelService {
     private boolean overlaps(ReportWork work, LocalDate start, LocalDate end) {
         if (work.getStartDate() == null) return periodTouchesRange(work.getPeriod(), start, end);
         if (work.getStartDate().isAfter(end)) return false;
-        if (!hasAdminDeadlineCorrection(work) && work.getCreatedAt() != null && work.getCreatedAt().toLocalDate().isAfter(end)) return false;
+        boolean completedInRange = work.getCompletedDate() != null && !work.getCompletedDate().isBefore(start) && !work.getCompletedDate().isAfter(end);
+        if (!hasAdminDeadlineCorrection(work) && !completedInRange && work.getCreatedAt() != null && work.getCreatedAt().toLocalDate().isAfter(end)) return false;
         if (work.getCompletedDate() != null && work.getCompletedDate().isBefore(start)) return false;
         return true;
     }
@@ -298,6 +299,10 @@ public class ReportExcelService {
 
     private boolean hasAdminDeadlineCorrection(ReportWork work) {
         return work.getExtensions().stream().anyMatch(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()));
+    }
+
+    private boolean isCompletedBy(ReportWork work, LocalDate cutoff) {
+        return work.getCompletedDate() != null && !work.getCompletedDate().isAfter(cutoff);
     }
 
     private boolean periodTouchesRange(String period, LocalDate start, LocalDate end) {
