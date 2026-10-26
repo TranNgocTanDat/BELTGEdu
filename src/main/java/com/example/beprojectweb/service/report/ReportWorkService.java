@@ -139,6 +139,13 @@ public class ReportWorkService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ngày bắt đầu và hạn hoàn thành là bắt buộc");
         if (request.getOriginalDueDate().isBefore(request.getStartDate()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hạn hoàn thành không được trước ngày bắt đầu");
+        if ("Hoàn thành".equals(request.getStatus())) {
+            LocalDate completedDate = request.getCompletedDate() != null ? request.getCompletedDate() : LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"));
+            if (completedDate.isBefore(request.getStartDate()))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ngày hoàn thành không được trước ngày bắt đầu");
+            if (completedDate.isAfter(LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ngày hoàn thành không được ở tương lai");
+        }
         ReportWorkGroup group = null;
         if (request.getGroupId() != null) {
             group = groupRepository.findById(request.getGroupId()).orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nhóm công việc không tồn tại"));
