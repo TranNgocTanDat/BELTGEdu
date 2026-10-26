@@ -2,6 +2,7 @@ package com.example.beprojectweb.controller.report;
 
 import com.example.beprojectweb.dto.request.report.ReportWorkRequest;
 import com.example.beprojectweb.dto.request.report.ReportWorkExtensionRequest;
+import com.example.beprojectweb.dto.request.report.ReportWorkDeadlineAdjustmentRequest;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.response.report.ReportWorkResponse;
 import com.example.beprojectweb.service.report.ReportWorkService;
@@ -43,6 +44,11 @@ public class ReportWorkController {
     @PostMapping("/{id}/extensions")
     public APIResponse<ReportWorkResponse> extend(@PathVariable UUID id, @Valid @RequestBody ReportWorkExtensionRequest request) {
         return APIResponse.<ReportWorkResponse>builder().result(service.extend(id, request)).build();
+    }
+
+    @PostMapping("/{id}/deadline-adjustments")
+    public APIResponse<ReportWorkResponse> adjustCompletedDeadline(@PathVariable UUID id, @Valid @RequestBody ReportWorkDeadlineAdjustmentRequest request) {
+        return APIResponse.<ReportWorkResponse>builder().result(service.adjustCompletedDeadline(id, request)).build();
     }
 
     @DeleteMapping("/{id}")

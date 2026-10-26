@@ -87,7 +87,7 @@ public class ReportExcelService {
         List<ReportWork> allWork = workRepository.findAllByOrderByPeriodDescTitleAsc();
         List<ReportWork> work = allWork.stream()
                 .filter(row -> dateRange ? overlaps(row, startDate, endDate) : inPeriod(row.getPeriod(), reportPeriod))
-                .filter(row -> row.getCreatedAt() == null || !row.getCreatedAt().toLocalDate().isAfter(asOf))
+                .filter(row -> hasAdminDeadlineCorrection(row) || row.getCreatedAt() == null || !row.getCreatedAt().toLocalDate().isAfter(asOf))
                 .toList();
         List<ReportKpi> kpis = kpiRepository.findAllByOrderByPeriodDescKpiKeyAsc().stream()
                 .filter(row -> dateRange ? periodTouchesRange(row.getPeriod(), startDate, endDate) : inPeriod(row.getPeriod(), reportPeriod)).toList();
@@ -105,6 +105,15 @@ public class ReportExcelService {
             String label = dateRange ? dateRangeLabel(startDate, endDate) : periodLabel(reportPeriod);
             List<? extends List<?>> workRows = work.stream().map(row -> workExportRow(row, asOf, futurePeriod)).toList();
             long completedWork = workRows.stream().filter(row -> "Hoàn thành".equals(row.get(8))).count();
+            long onTimeOriginal = workRows.stream().filter(row -> "Đúng hạn ban đầu".equals(row.get(9))).count();
+            long onTimeExtended = workRows.stream().filter(row -> "Đúng hạn sau gia hạn".equals(row.get(9))).count();
+            long onTimeAdjusted = workRows.stream().filter(row -> "Đúng hạn sau điều chỉnh".equals(row.get(9))).count();
+            long completedLate = workRows.stream().filter(row -> "Hoàn thành trễ".equals(row.get(9))).count();
+            long extensionCount = work.stream().flatMap(row -> row.getExtensions().stream())
+                    .filter(extension -> inRange(extension.getCreatedAt(), rangeStart, asOf))
+                    .filter(extension -> !"ADMIN_CORRECTION".equals(extension.getChangeType())).count();
+            long adjustmentCount = work.stream().flatMap(row -> row.getExtensions().stream())
+                    .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType())).count();
             writeSheet(workbook, "Tổng quan", "BÁO CÁO QUẢN TRỊ · " + label,
                     List.of("Chỉ tiêu", "Kết quả"), List.of(
                             List.of("Nhân sự đang làm", staff.stream().filter(row -> "Đang làm".equals(row.getStatus())).count()),
@@ -112,6 +121,12 @@ public class ReportExcelService {
                             List.of(futurePeriod ? "Công việc dự kiến" : "Đầu việc trong kỳ", work.size()),
                             List.of(futurePeriod ? "Mốc lập kế hoạch" : "Mốc chốt dữ liệu", asOf.toString()),
                             List.of(futurePeriod ? "Kết quả thực hiện" : "Đầu việc hoàn thành tại ngày chốt", futurePeriod ? "Chưa đến kỳ" : completedWork),
+                            List.of("Đúng hạn theo hạn ban đầu", futurePeriod ? "Chưa đến kỳ" : onTimeOriginal),
+                            List.of("Đúng hạn sau gia hạn", futurePeriod ? "Chưa đến kỳ" : onTimeExtended),
+                            List.of("Đúng hạn sau điều chỉnh bởi ADMIN", futurePeriod ? "Chưa đến kỳ" : onTimeAdjusted),
+                            List.of("Hoàn thành trễ", futurePeriod ? "Chưa đến kỳ" : completedLate),
+                            List.of("Số lần gia hạn trong kỳ", futurePeriod ? "Chưa đến kỳ" : extensionCount),
+                            List.of("Số lần điều chỉnh hạn ADMIN (kể cả hậu kỳ)", futurePeriod ? "Chưa đến kỳ" : adjustmentCount),
                             List.of(futurePeriod ? "Chỉ tiêu dự kiến" : "KPI được ghi nhận", kpis.size()),
                             List.of(futurePeriod ? "Mục tiêu dự kiến" : "Mục tiêu trong kỳ", goals.size()),
                             List.of("Tiến độ mục tiêu trung bình", futurePeriod ? "Chưa đến kỳ" : goals.isEmpty() ? "—" : average(goals.stream().mapToInt(ReportGoal::getProgress).toArray()) + "%"),
@@ -129,10 +144,10 @@ public class ReportExcelService {
                         .map(row -> (List<?>) row).toList();
                 writeSheet(workbook, "Cập nhật", "LỊCH SỬ CẬP NHẬT · " + label, List.of("Thời điểm", "Nhóm", "Công việc", "Phụ trách", "Tiến độ", "Trạng thái", "Ghi chú", "Người cập nhật"), progressHistory, titleStyle, headerStyle, bodyStyle);
                 List<? extends List<?>> extensions = work.stream().flatMap(row -> row.getExtensions().stream()
-                        .filter(extension -> inRange(extension.getCreatedAt(), startDate, asOf))
-                        .map(extension -> List.of(extension.getCreatedAt().toString(), row.getGroup(), row.getTitle(), extension.getPreviousDueDate().toString(), extension.getNewDueDate().toString(), extension.getReason(), extension.getExtendedBy())))
+                        .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()) || inRange(extension.getCreatedAt(), startDate, asOf))
+                        .map(extension -> List.of(extension.getCreatedAt().toString(), "ADMIN_CORRECTION".equals(extension.getChangeType()) ? "Điều chỉnh bởi ADMIN" : "Gia hạn", row.getGroup(), row.getTitle(), extension.getPreviousDueDate().toString(), extension.getNewDueDate().toString(), extension.getReason(), extension.getExtendedBy())))
                         .map(row -> (List<?>) row).toList();
-                writeSheet(workbook, "Gia hạn", "LỊCH SỬ GIA HẠN · " + label, List.of("Thời điểm", "Nhóm", "Công việc", "Hạn cũ", "Hạn mới", "Lý do", "Người gia hạn"), extensions, titleStyle, headerStyle, bodyStyle);
+                writeSheet(workbook, "Thay đổi hạn", "LỊCH SỬ THAY ĐỔI HẠN · " + label, List.of("Thời điểm", "Loại thay đổi", "Nhóm", "Công việc", "Hạn cũ", "Hạn mới", "Lý do", "Người thực hiện"), extensions, titleStyle, headerStyle, bodyStyle);
             }
             writeSheet(workbook, "KPI", (futurePeriod ? "CHỈ TIÊU DỰ KIẾN · " : "KẾT QUẢ KPI · ") + periodLabel(reportPeriod), List.of("Kỳ", "Chỉ số", "Mục tiêu", "Thực tế", "Mức đạt"),
                     kpis.stream().map(row -> futurePeriod
@@ -217,7 +232,7 @@ public class ReportExcelService {
     private boolean overlaps(ReportWork work, LocalDate start, LocalDate end) {
         if (work.getStartDate() == null) return periodTouchesRange(work.getPeriod(), start, end);
         if (work.getStartDate().isAfter(end)) return false;
-        if (work.getCreatedAt() != null && work.getCreatedAt().toLocalDate().isAfter(end)) return false;
+        if (!hasAdminDeadlineCorrection(work) && work.getCreatedAt() != null && work.getCreatedAt().toLocalDate().isAfter(end)) return false;
         if (work.getCompletedDate() != null && work.getCompletedDate().isBefore(start)) return false;
         return true;
     }
@@ -225,7 +240,7 @@ public class ReportExcelService {
     private List<?> workExportRow(ReportWork work, LocalDate asOfDate, boolean planOnly) {
         LocalDate dueDate = work.getOriginalDueDate();
         ReportWorkExtension latestExtension = work.getExtensions().stream()
-                .filter(extension -> !extension.getCreatedAt().toLocalDate().isAfter(asOfDate))
+                .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()) || !extension.getCreatedAt().toLocalDate().isAfter(asOfDate))
                 .max(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt)).orElse(null);
         if (latestExtension != null) dueDate = latestExtension.getNewDueDate();
         if (planOnly) {
@@ -245,9 +260,11 @@ public class ReportExcelService {
             if (isComplete && !wasComplete) completionEventDate = update.getUpdatedAt().toLocalDate();
             wasComplete = isComplete;
         }
+        LocalDate recordedCompletionDate = work.getCompletedDate() != null && !work.getCompletedDate().isAfter(asOfDate)
+                ? work.getCompletedDate() : null;
         LocalDate completedDate = last != null
-                ? ("Hoàn thành".equals(last.getStatus()) ? completionEventDate : null)
-                : (work.getCompletedDate() != null && !work.getCompletedDate().isAfter(asOfDate) ? work.getCompletedDate() : null);
+                ? ("Hoàn thành".equals(last.getStatus()) ? (recordedCompletionDate != null ? recordedCompletionDate : completionEventDate) : null)
+                : recordedCompletionDate;
         boolean completedByCutoff = completedDate != null;
         if (completedByCutoff) {
             status = "Hoàn thành";
@@ -264,7 +281,7 @@ public class ReportExcelService {
         String deadlineResult;
         if (completedByCutoff) {
             if (work.getOriginalDueDate() != null && !completedDate.isAfter(work.getOriginalDueDate())) deadlineResult = "Đúng hạn ban đầu";
-            else if (dueDate != null && !completedDate.isAfter(dueDate)) deadlineResult = "Đúng hạn sau gia hạn";
+            else if (dueDate != null && !completedDate.isAfter(dueDate)) deadlineResult = latestExtension != null && "ADMIN_CORRECTION".equals(latestExtension.getChangeType()) ? "Đúng hạn sau điều chỉnh" : "Đúng hạn sau gia hạn";
             else deadlineResult = "Hoàn thành trễ";
         } else {
             deadlineResult = dueDate != null && dueDate.isBefore(asOfDate) ? "Quá hạn" : "Trong hạn";
@@ -277,6 +294,10 @@ public class ReportExcelService {
     private boolean inRange(LocalDateTime dateTime, LocalDate start, LocalDate end) {
         LocalDate date = dateTime.toLocalDate();
         return !date.isBefore(start) && !date.isAfter(end);
+    }
+
+    private boolean hasAdminDeadlineCorrection(ReportWork work) {
+        return work.getExtensions().stream().anyMatch(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()));
     }
 
     private boolean periodTouchesRange(String period, LocalDate start, LocalDate end) {

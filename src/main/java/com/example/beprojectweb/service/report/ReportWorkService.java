@@ -13,6 +13,7 @@ import com.example.beprojectweb.repository.report.ReportWorkGroupRepository;
 import com.example.beprojectweb.repository.report.ReportWorkUpdateRepository;
 import com.example.beprojectweb.repository.report.ReportWorkExtensionRepository;
 import com.example.beprojectweb.dto.request.report.ReportWorkExtensionRequest;
+import com.example.beprojectweb.dto.request.report.ReportWorkDeadlineAdjustmentRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -80,10 +81,42 @@ public class ReportWorkService {
         extension.setNewDueDate(request.getNewDueDate());
         extension.setReason(request.getReason().trim());
         extension.setExtendedBy(username);
+        extension.setChangeType("EXTENSION");
         work.getExtensions().add(extension);
         extensionRepository.save(extension);
         work.setCurrentDueDate(request.getNewDueDate());
         work.setStatus("Đang thực hiện");
+        return toResponse(workRepository.save(work));
+    }
+
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
+    public ReportWorkResponse adjustCompletedDeadline(UUID id, ReportWorkDeadlineAdjustmentRequest request) {
+        ReportWork work = workRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report work item not found"));
+        LocalDate completedDate = work.getCompletedDate() != null ? work.getCompletedDate() : work.getUpdates().stream()
+                .filter(update -> "Hoàn thành".equals(update.getStatus()))
+                .max(java.util.Comparator.comparing(ReportWorkUpdate::getUpdatedAt))
+                .map(update -> update.getUpdatedAt().toLocalDate()).orElse(null);
+        if (completedDate == null || !"Hoàn thành".equals(work.getStatus()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Chỉ có thể điều chỉnh hạn của công việc đã hoàn thành");
+        if (request.getNewDueDate().isBefore(completedDate))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hạn điều chỉnh phải cùng ngày hoặc sau ngày hoàn thành thực tế");
+        if (work.getStartDate() != null && request.getNewDueDate().isBefore(work.getStartDate()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hạn điều chỉnh không được trước ngày bắt đầu");
+
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        ReportWorkExtension adjustment = new ReportWorkExtension();
+        adjustment.setWork(work);
+        adjustment.setCreatedAt(LocalDateTime.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")));
+        adjustment.setPreviousDueDate(work.getCurrentDueDate() != null ? work.getCurrentDueDate() : work.getOriginalDueDate());
+        adjustment.setNewDueDate(request.getNewDueDate());
+        adjustment.setReason(request.getReason().trim());
+        adjustment.setExtendedBy(username);
+        adjustment.setChangeType("ADMIN_CORRECTION");
+        work.getExtensions().add(adjustment);
+        extensionRepository.save(adjustment);
+        work.setCurrentDueDate(request.getNewDueDate());
         return toResponse(workRepository.save(work));
     }
 
@@ -139,7 +172,7 @@ public class ReportWorkService {
         List<ReportWorkResponse.Update> updates = work.getUpdates().stream().sorted(java.util.Comparator.comparing(ReportWorkUpdate::getUpdatedAt))
                 .map(item -> new ReportWorkResponse.Update(item.getId(), item.getUpdatedAt(), item.getProgress(), item.getStatus(), item.getNote(), item.getUpdatedBy())).toList();
         List<ReportWorkResponse.Extension> extensions = work.getExtensions().stream().sorted(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt))
-                .map(item -> new ReportWorkResponse.Extension(item.getId(), item.getCreatedAt(), item.getPreviousDueDate(), item.getNewDueDate(), item.getReason(), item.getExtendedBy())).toList();
+                .map(item -> new ReportWorkResponse.Extension(item.getId(), item.getCreatedAt(), item.getPreviousDueDate(), item.getNewDueDate(), item.getReason(), item.getExtendedBy(), item.getChangeType() == null ? "EXTENSION" : item.getChangeType())).toList();
         // Return the persisted work state. Period-specific and current overdue status is calculated by report snapshots.
         return new ReportWorkResponse(work.getId(), work.getPeriod(), work.getWorkGroup() == null ? work.getGroup() : work.getWorkGroup().getName(), work.getTitle(), work.getOwner().getId(), work.getProgress(), work.getStatus(), work.getImpact(), work.getWorkGroup() == null ? null : work.getWorkGroup().getId(), work.getStartDate(), work.getOriginalDueDate(), work.getCurrentDueDate(), work.getCompletedDate(), work.getCreatedAt(), deadlineResult(work), updates, extensions);
     }
@@ -147,7 +180,12 @@ public class ReportWorkService {
     private String deadlineResult(ReportWork work) {
         if (work.getCompletedDate() != null) {
             if (work.getOriginalDueDate() != null && !work.getCompletedDate().isAfter(work.getOriginalDueDate())) return "Đúng hạn ban đầu";
-            if (work.getCurrentDueDate() != null && !work.getCompletedDate().isAfter(work.getCurrentDueDate())) return "Đúng hạn sau gia hạn";
+            if (work.getCurrentDueDate() != null && !work.getCompletedDate().isAfter(work.getCurrentDueDate())) {
+                ReportWorkExtension latestChange = work.getExtensions().stream()
+                        .max(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt)).orElse(null);
+                return latestChange != null && "ADMIN_CORRECTION".equals(latestChange.getChangeType())
+                        ? "Đúng hạn sau điều chỉnh" : "Đúng hạn sau gia hạn";
+            }
             return "Hoàn thành trễ";
         }
         return work.getCurrentDueDate() != null && LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).isAfter(work.getCurrentDueDate()) ? "Quá hạn" : "Trong hạn";

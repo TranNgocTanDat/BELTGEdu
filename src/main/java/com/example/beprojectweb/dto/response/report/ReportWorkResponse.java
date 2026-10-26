@@ -32,5 +32,5 @@ public class ReportWorkResponse {
     private List<Extension> extensions;
 
     public record Update(UUID id, LocalDateTime updatedAt, Integer progress, String status, String note, String updatedBy) {}
-    public record Extension(UUID id, LocalDateTime createdAt, LocalDate previousDueDate, LocalDate newDueDate, String reason, String extendedBy) {}
+    public record Extension(UUID id, LocalDateTime createdAt, LocalDate previousDueDate, LocalDate newDueDate, String reason, String extendedBy, String changeType) {}
 }

@@ -48,4 +48,8 @@ public class ReportWorkExtension {
 
     @Column(nullable = false, length = 160)
     String extendedBy;
+
+    // Null is retained as the legacy representation of a normal extension.
+    @Column(name = "change_type", length = 32)
+    String changeType;
 }
