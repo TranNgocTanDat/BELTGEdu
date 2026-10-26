@@ -60,7 +60,7 @@ public class UserService {
         return userMapper.toUserResponse(requested);
     }
 
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'REPORT_WORK', 'ADMIN_SCHOOL')")
     @Transactional(readOnly = true)
     public UserResponse getMyInfo() {
         return userMapper.toUserResponse(currentUser());

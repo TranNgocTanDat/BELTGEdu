@@ -27,7 +27,7 @@ public class ScheduleService {
  private final HolidayRepository holidays;
  private record MutableWeek(LocalDate start,LinkedHashSet<String> labels,List<ScheduleWeekResponse.Item> items){}
 
- @PreAuthorize("hasAnyRole('ADMIN','USER')") @Transactional(readOnly=true)
+ @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional(readOnly=true)
  public List<ScheduleWeekResponse> weeks(UUID registrationId,String service){
   Registration reg=registrations.findById(registrationId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Registration not found")); assertAccess(current(),reg.getSchool());
   String type=service==null?"":service.toLowerCase(Locale.ROOT); if(!Set.of("stem","digital").contains(type)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"service must be stem or digital");
@@ -68,7 +68,7 @@ public class ScheduleService {
  private LocalDate weekStart(LocalDate d){int dow=d.getDayOfWeek().getValue();return d.plusDays(dow>=6?8-dow:1-dow);}
  private void addHolidayWeeks(Set<LocalDate> closed,DayOfWeek studyDay){if(studyDay==null)return;for(Holiday holiday:holidays.findAll()){LocalDate day=holiday.getStartDate();while(!day.isAfter(holiday.getEndDate())){if(day.getDayOfWeek()==studyDay)closed.add(weekStart(day));day=day.plusDays(1);}}}
  private User current(){String username=SecurityContextHolder.getContext().getAuthentication().getName();return users.findByUsername(username).orElseThrow(()->new AppException(ErrorCode.USER_NOT_EXISTS));}
- private boolean isAdmin(User u){return u.getRoles()!=null&&u.getRoles().contains(Role.ADMIN.name());}
+ private boolean isAdmin(User u){return u.getRoles()!=null&&(u.getRoles().contains(Role.ADMIN.name())||u.getRoles().contains(Role.ADMIN_SCHOOL.name()));}
  private void assertAccess(User u,School s){if(!isAdmin(u)&&(u.getRegion()==null||!u.getRegion().getId().equals(s.getRegion().getId())))throw new AccessDeniedException("You can only view schedules in your assigned region");}
 }
 

@@ -52,7 +52,7 @@ public class AnnouncementService {
     private final DigitalLessonRepository digitalLessonRepository;
     private final LessonProgressRepository lessonProgressRepository;
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional(readOnly = true)
     public List<AnnouncementResponse> getAnnouncements(UUID schoolId) {
         User user = currentUser();
@@ -71,7 +71,7 @@ public class AnnouncementService {
         return items.stream().map(this::toResponse).toList();
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public AnnouncementResponse mark(AnnouncementRequest request) {
         User user = currentUser();
@@ -117,7 +117,7 @@ public class AnnouncementService {
         return toResponse(announcementRepository.save(item));
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public void unmark(String key, AnnouncementProgressBatchRequest request) {
         User user = currentUser();
@@ -206,7 +206,7 @@ public class AnnouncementService {
     }
 
     private boolean isAdmin(User user) {
-        return user.getRoles() != null && user.getRoles().contains(Role.ADMIN.name());
+        return user.getRoles() != null && (user.getRoles().contains(Role.ADMIN.name()) || user.getRoles().contains(Role.ADMIN_SCHOOL.name()));
     }
 
     private AnnouncementResponse toResponse(Announcement item) {

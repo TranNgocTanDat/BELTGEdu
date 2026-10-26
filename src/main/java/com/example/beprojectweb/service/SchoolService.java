@@ -40,7 +40,7 @@ public class SchoolService {
     private final RegistrationRepository registrationRepository;
     private final JdbcTemplate jdbcTemplate;
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional(readOnly = true)
     public List<SchoolResponse> getSchools() {
         User user = currentUser();
@@ -50,7 +50,7 @@ public class SchoolService {
         return schools.stream().map(this::toResponse).toList();
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional(readOnly = true)
     public SchoolResponse getSchool(UUID id) {
         User user = currentUser();
@@ -59,7 +59,7 @@ public class SchoolService {
         return toResponse(school);
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public SchoolResponse create(SchoolRequest request) {
         User user = currentUser();
@@ -78,7 +78,7 @@ public class SchoolService {
         return toResponse(schoolRepository.save(school));
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public SchoolResponse update(UUID id, SchoolRequest request) {
         User user = currentUser();
@@ -95,7 +95,7 @@ public class SchoolService {
         return toResponse(schoolRepository.save(school));
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public void delete(UUID id) {
         User user = currentUser();
@@ -135,7 +135,7 @@ public class SchoolService {
     }
 
     private boolean isAdmin(User user) {
-        return user.getRoles() != null && user.getRoles().contains(Role.ADMIN.name());
+        return user.getRoles() != null && (user.getRoles().contains(Role.ADMIN.name()) || user.getRoles().contains(Role.ADMIN_SCHOOL.name()));
     }
 
     private School findSchool(UUID id) {

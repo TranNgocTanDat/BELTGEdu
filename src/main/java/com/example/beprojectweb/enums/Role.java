@@ -2,5 +2,7 @@ package com.example.beprojectweb.enums;
 
 public enum Role {
     ADMIN,
-    USER
+    USER,
+    REPORT_WORK,
+    ADMIN_SCHOOL
 }

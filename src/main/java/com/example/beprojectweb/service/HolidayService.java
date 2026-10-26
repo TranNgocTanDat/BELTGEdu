@@ -18,7 +18,7 @@ import java.util.UUID;
 public class HolidayService {
     private final HolidayRepository holidays;
 
-    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')")
     @Transactional(readOnly = true)
     public List<HolidayResponse> list(Integer year) {
         List<Holiday> rows = holidays.findAll().stream()
@@ -27,7 +27,7 @@ public class HolidayService {
         return rows.stream().map(this::response).toList();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public HolidayResponse create(HolidayRequest request) {
         validate(request);
@@ -35,7 +35,7 @@ public class HolidayService {
                 .startDate(request.getStartDate()).endDate(request.getEndDate()).build()));
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public HolidayResponse update(UUID id, HolidayRequest request) {
         validate(request);
@@ -47,7 +47,7 @@ public class HolidayService {
         return response(holiday);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public void delete(UUID id) {
         Holiday holiday = holidays.findById(id)

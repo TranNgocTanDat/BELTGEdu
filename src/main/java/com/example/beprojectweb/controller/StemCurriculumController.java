@@ -31,7 +31,7 @@ public class StemCurriculumController {
     private final StemCurriculumService curriculumService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'ADMIN_SCHOOL')")
     public APIResponse<List<StemCourseResponse>> getCourses(
             @RequestParam(required = false) StemProgram program,
             @RequestParam(required = false) StemSubject subject,

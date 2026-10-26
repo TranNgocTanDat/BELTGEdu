@@ -29,7 +29,7 @@ public class DigitalCurriculumController {
     private final DigitalCurriculumService curriculumService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'ADMIN_SCHOOL')")
     public APIResponse<List<DigitalLessonResponse>> getLessons(
             @RequestParam(required = false) DigitalProgram program,
             @RequestParam(required = false) Integer grade) {

@@ -28,7 +28,7 @@ public class RegionService {
     @Transactional(readOnly = true)
     public List<RegionResponse> getRegions() {
         User user = currentUser();
-        if (user.getRoles() != null && user.getRoles().contains(Role.ADMIN.name())) {
+        if (user.getRoles() != null && (user.getRoles().contains(Role.ADMIN.name()) || user.getRoles().contains(Role.ADMIN_SCHOOL.name()))) {
             return regionRepository.findAll().stream().map(this::toResponse).toList();
         }
         return user.getRegion() == null ? List.of() : List.of(toResponse(user.getRegion()));

@@ -40,7 +40,7 @@ public class DigitalCurriculumService {
                 .map(this::toResponse).toList();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public DigitalLessonResponse renameLesson(String id, LessonTitleRequest request) {
         DigitalLesson lesson = lessonRepository.findById(id)
@@ -52,7 +52,7 @@ public class DigitalCurriculumService {
         return toResponse(lesson);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public DigitalLessonResponse createLesson(DigitalLessonCreateRequest request) {
         if (lessonRepository.existsByProgramAndGradeAndLessonOrder(request.getProgram(), request.getGrade(), request.getOrder())) {
@@ -65,7 +65,7 @@ public class DigitalCurriculumService {
         return toResponse(lessonRepository.save(lesson));
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public DigitalLessonResponse updateLesson(String id, DigitalLessonUpdateRequest request) {
         DigitalLesson lesson = lessonRepository.findById(id)
@@ -81,7 +81,7 @@ public class DigitalCurriculumService {
         return toResponse(lessonRepository.save(lesson));
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public void deleteLesson(String id) {
         DigitalLesson lesson = lessonRepository.findById(id)

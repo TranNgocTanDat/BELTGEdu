@@ -32,7 +32,7 @@ public class SchoolClosureService {
     private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional(readOnly = true)
     public List<SchoolClosureResponse> getClosures(UUID schoolId) {
         User user = currentUser();
@@ -51,7 +51,7 @@ public class SchoolClosureService {
         return items.stream().map(this::toResponse).toList();
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public SchoolClosureResponse addOrUpdate(SchoolClosureRequest request) {
         User user = currentUser();
@@ -68,7 +68,7 @@ public class SchoolClosureService {
         return toResponse(closureRepository.save(closure));
     }
 
-    @PreAuthorize("hasAnyRole('ADMIN', 'USER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public void remove(UUID id) {
         User user = currentUser();
@@ -98,7 +98,7 @@ public class SchoolClosureService {
     }
 
     private boolean isAdmin(User user) {
-        return user.getRoles() != null && user.getRoles().contains(Role.ADMIN.name());
+        return user.getRoles() != null && (user.getRoles().contains(Role.ADMIN.name()) || user.getRoles().contains(Role.ADMIN_SCHOOL.name()));
     }
 
     private SchoolClosureResponse toResponse(SchoolClosure item) {

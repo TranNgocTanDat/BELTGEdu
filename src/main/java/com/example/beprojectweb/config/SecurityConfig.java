@@ -66,7 +66,7 @@ public class SecurityConfig {
 
                         // User access is additionally scoped by region in UserService.
                         .requestMatchers(HttpMethod.GET, "/users/myInfo")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.REPORT_WORK.name(), Role.ADMIN_SCHOOL.name())
                         .requestMatchers(HttpMethod.PUT, "/users/me/update")
                         .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
                         .requestMatchers(HttpMethod.GET, "/users", "/users/**")
@@ -81,24 +81,27 @@ public class SecurityConfig {
                         .hasRole(Role.ADMIN.name())
 
                         .requestMatchers(HttpMethod.GET, "/schools", "/schools/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
                         .requestMatchers(HttpMethod.POST, "/schools/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
                         .requestMatchers(HttpMethod.PUT, "/schools/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
                         .requestMatchers(HttpMethod.DELETE, "/schools/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
 
                         .requestMatchers("/registrations/**", "/stem-plans/**", "/digital-plans/**", "/lesson-progress/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
 
                         .requestMatchers("/announcements/**", "/school-closures/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
 
                         // Users can read their assigned region; only administrators can manage regions.
                         .requestMatchers(HttpMethod.GET, "/regions", "/regions/**")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
-                        .requestMatchers("/regions/**").hasRole(Role.ADMIN.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
+                        .requestMatchers("/regions/**").hasAnyRole(Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
+
+                        .requestMatchers("/report-work/**")
+                        .hasAnyRole(Role.ADMIN.name(), Role.REPORT_WORK.name())
 
                         // GAME KEY
                         .requestMatchers(

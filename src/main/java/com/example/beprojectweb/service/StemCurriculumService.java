@@ -56,7 +56,7 @@ public class StemCurriculumService {
                 .toList();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public StemLessonResponse renameLesson(String id, LessonTitleRequest request) {
         StemLesson lesson = lessonRepository.findById(id)
@@ -68,7 +68,7 @@ public class StemCurriculumService {
         return toLessonResponse(lesson);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public StemCourseResponse createCourse(StemCourseRequest request) {
         String code = request.getCode().trim();
@@ -81,7 +81,7 @@ public class StemCurriculumService {
         return toCourseResponse(course, List.of());
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public StemCourseResponse updateCourse(String id, StemCourseRequest request) {
         StemCourse course = courseRepository.findById(id)
@@ -96,7 +96,7 @@ public class StemCurriculumService {
                 .map(this::toLessonResponse).toList());
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public void deleteCourse(String id) {
         StemCourse course = courseRepository.findById(id)
@@ -112,7 +112,7 @@ public class StemCurriculumService {
         courseRepository.delete(course);
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public List<StemLessonResponse> createLessons(String courseId, List<StemLessonCreateRequest> requests) {
         StemCourse course = courseRepository.findById(courseId)
@@ -136,7 +136,7 @@ public class StemCurriculumService {
         return lessonRepository.saveAll(lessons).stream().map(this::toLessonResponse).toList();
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public void deleteLesson(String id) {
         StemLesson lesson = lessonRepository.findById(id)
