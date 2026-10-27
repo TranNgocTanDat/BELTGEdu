@@ -1,6 +1,7 @@
 package com.example.beprojectweb.service;
 
 import com.example.beprojectweb.dto.request.AnnouncementRequest;
+import com.example.beprojectweb.dto.request.AnnouncementBulkRequest;
 import com.example.beprojectweb.dto.request.AnnouncementProgressBatchRequest;
 import com.example.beprojectweb.dto.request.LessonProgressRequest;
 import com.example.beprojectweb.dto.response.AnnouncementResponse;
@@ -37,6 +38,8 @@ import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -116,6 +119,32 @@ public class AnnouncementService {
         item.setSchool(school);
         validateAndUpdateProgress(registration, service, request.getProgress(), "DONE");
         return toResponse(announcementRepository.save(item));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
+    @Transactional
+    public List<AnnouncementResponse> markBulk(AnnouncementBulkRequest request) {
+        List<AnnouncementRequest> items = request == null ? null : request.getItems();
+        if (items == null || items.isEmpty() || items.size() > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "items must contain between 1 and 100 announcements");
+        }
+        if (items.stream().anyMatch(java.util.Objects::isNull) || items.get(0).getService() == null || items.get(0).getWeekStart() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each bulk announcement must be complete");
+        }
+        String service = items.get(0).getService().toLowerCase(Locale.ROOT);
+        LocalDate weekStart = items.get(0).getWeekStart();
+        Set<String> keys = new HashSet<>();
+        for (AnnouncementRequest item : items) {
+            if (item.getService() == null || item.getWeekStart() == null
+                    || !service.equals(item.getService().toLowerCase(Locale.ROOT)) || !weekStart.equals(item.getWeekStart())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Bulk announcements must use the same service and actual week");
+            }
+            String key = item.getRegistrationId() + ":" + service + ":" + weekStart;
+            if (!keys.add(key)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Bulk request contains a duplicate school registration");
+            }
+        }
+        return items.stream().map(this::mark).toList();
     }
 
     @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")

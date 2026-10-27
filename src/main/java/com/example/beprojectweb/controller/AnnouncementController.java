@@ -1,6 +1,7 @@
 package com.example.beprojectweb.controller;
 
 import com.example.beprojectweb.dto.request.AnnouncementRequest;
+import com.example.beprojectweb.dto.request.AnnouncementBulkRequest;
 import com.example.beprojectweb.dto.request.AnnouncementProgressBatchRequest;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.response.AnnouncementResponse;
@@ -35,6 +36,11 @@ public class AnnouncementController {
     @PostMapping
     public APIResponse<AnnouncementResponse> mark(@RequestBody @Valid AnnouncementRequest request) {
         return APIResponse.<AnnouncementResponse>builder().result(announcementService.mark(request)).build();
+    }
+
+    @PostMapping("/bulk")
+    public APIResponse<List<AnnouncementResponse>> markBulk(@RequestBody @Valid AnnouncementBulkRequest request) {
+        return APIResponse.<List<AnnouncementResponse>>builder().result(announcementService.markBulk(request)).build();
     }
 
     @DeleteMapping("/{key}")
