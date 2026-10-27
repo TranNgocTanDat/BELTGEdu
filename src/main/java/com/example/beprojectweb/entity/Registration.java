@@ -18,6 +18,7 @@ public class Registration {
  @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="registration_stem_grades", joinColumns=@JoinColumn(name="registration_id")) @Column(name="grade", nullable=false) Set<Integer> stemGrades=new LinkedHashSet<>();
  @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="registration_digital_grades", joinColumns=@JoinColumn(name="registration_id")) @Column(name="grade", nullable=false) Set<Integer> digitalGrades=new LinkedHashSet<>();
  @Column(name="term_1_start") LocalDate term1Start; @Column(name="term_2_start") LocalDate term2Start; @Column(name="term_3_start") LocalDate term3Start; @Column(name="term_4_start") LocalDate term4Start; @Column(name="digital_start") LocalDate digitalStart;
+ @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="registration_stem_term_weeks", joinColumns=@JoinColumn(name="registration_id"), uniqueConstraints=@UniqueConstraint(name="uk_registration_stem_term_week", columnNames={"registration_id","term_number"})) @MapKeyColumn(name="term_number") @Column(name="weeks_count", nullable=false) @Builder.Default Map<Integer,Integer> stemTermWeeks=new LinkedHashMap<>();
  @Enumerated(EnumType.STRING) @Column(name="stem_study_day", length=12) DayOfWeek stemStudyDay;
  @Enumerated(EnumType.STRING) @Column(name="digital_study_day", length=12) DayOfWeek digitalStudyDay;
 }

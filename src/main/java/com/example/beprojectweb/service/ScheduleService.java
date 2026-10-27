@@ -20,8 +20,7 @@ import java.util.*;
 
 @Service @RequiredArgsConstructor
 public class ScheduleService {
- private static final int WEEKS_PER_TERM=9;
- private final RegistrationRepository registrations; private final StemPlanRepository stemPlans; private final DigitalPlanRepository digitalPlans;
+ private final RegistrationRepository registrations; private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
  private final SchoolClosureRepository closures; private final AnnouncementRepository announcements; private final UserRepository users;
  private final HolidayRepository holidays;
@@ -42,18 +41,64 @@ public class ScheduleService {
    List<String> labels=w.labels.stream().filter(label->{if(type.equals("digital"))return true;String[] parts=label.split(" · ",2);try{return unlocked.contains(Integer.parseInt(parts[0].replace("Học phần ","")));}catch(Exception e){return true;}}).toList(); LocalDate deadline=w.start.minusDays(4); boolean hasAnn=announced.contains(w.start); out.add(new ScheduleWeekResponse(w.start,w.start.plusDays(4),String.join(" + ",labels),hasAnn,true,!hasAnn&&today.isAfter(deadline),deadline,items));
   } return out;
  }
+ private record SchedulePlan(UUID id,int effectiveWeek,StemCourse course){}
  private void buildStem(Registration r,Map<LocalDate,MutableWeek> map,Set<LocalDate> closed){
-  List<StemPlan> plans=stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(r.getId());
-  List<String> courseIds=plans.stream().map(p->p.getCourse().getId()).distinct().toList();
-  Map<String,List<StemLesson>> lessonsByCourse=courseIds.isEmpty()?Map.of():stemLessons.findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(courseIds).stream().collect(java.util.stream.Collectors.groupingBy(l->l.getCourse().getId()));
-  Map<Integer,List<StemPlan>> plansByTerm=plans.stream().collect(java.util.stream.Collectors.groupingBy(StemPlan::getTerm));
-  LocalDate nextTerm=null; LocalDate[] starts={r.getTerm1Start(),r.getTerm2Start(),r.getTerm3Start(),r.getTerm4Start()};
-  for(int t=1;t<=4;t++){int term=t;LocalDate raw=starts[t-1];if(raw==null)continue;LocalDate start=weekStart(raw);LocalDate scheduled=nextTerm!=null&&nextTerm.isAfter(start)?nextTerm:start;
-   for(int i=0;i<WEEKS_PER_TERM;i++){scheduled=skipClosed(scheduled,closed);LocalDate original=start.plusWeeks(i);MutableWeek w=week(map,scheduled,"Học phần "+term+" · Tuần "+(i+1));
-    for(StemPlan p:plansByTerm.getOrDefault(term,List.of())){if(!r.getStemGrades().contains(p.getGrade()))continue;List<StemLesson> lessons=lessonsByCourse.getOrDefault(p.getCourse().getId(),List.of());if(i<lessons.size()){StemLesson lesson=lessons.get(i);w.items.add(new ScheduleWeekResponse.Item(p.getGrade(),p.getCourse().getCode(),lesson.getTitle(),i+1,term,original));}}
+  List<StemPlan> basePlans=stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(r.getId());
+  List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdInAndActiveTrueOrderByGradeAscTermAscEffectiveFromWeekAsc(List.of(r.getId()));
+  List<UUID> planIds=new ArrayList<>();
+  basePlans.forEach(p->planIds.add(p.getId()));versions.forEach(p->planIds.add(p.getId()));
+  Map<UUID,List<String>> lessonOrders=new HashMap<>();
+  if(!planIds.isEmpty())stemLessonOrders.findAllByPlanItemIdInOrderByPlanItemIdAscPositionAsc(planIds)
+          .forEach(item->lessonOrders.computeIfAbsent(item.getPlanItemId(),key->new ArrayList<>()).add(item.getLessonId()));
+  List<String> courseIds=new ArrayList<>();
+  for(StemPlan plan:basePlans)courseIds.add(plan.getCourse().getId());
+  for(StemPlanVersion plan:versions)courseIds.add(plan.getCourse().getId());
+  List<String> distinctCourseIds=courseIds.stream().distinct().toList();
+  Map<String,List<StemLesson>> lessonsByCourse=distinctCourseIds.isEmpty()?Map.of():stemLessons.findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(distinctCourseIds)
+          .stream().collect(java.util.stream.Collectors.groupingBy(l->l.getCourse().getId()));
+  Map<Integer,List<StemPlan>> baseByTerm=basePlans.stream().collect(java.util.stream.Collectors.groupingBy(StemPlan::getTerm));
+  Map<Integer,List<StemPlanVersion>> versionsByTerm=versions.stream().collect(java.util.stream.Collectors.groupingBy(StemPlanVersion::getTerm));
+  LocalDate nextTerm=null;LocalDate[] starts={r.getTerm1Start(),r.getTerm2Start(),r.getTerm3Start(),r.getTerm4Start()};
+  for(int term=1;term<=4;term++){
+   LocalDate raw=starts[term-1];if(raw==null)continue;
+   int termLength=termWeeks(r,term);LocalDate originalStart=weekStart(raw);
+   LocalDate scheduled=nextTerm!=null&&nextTerm.isAfter(originalStart)?nextTerm:originalStart;
+   for(int weekNo=1;weekNo<=termLength;weekNo++){
+    scheduled=skipClosed(scheduled,closed);LocalDate original=originalStart.plusWeeks(weekNo-1L);
+    MutableWeek row=week(map,scheduled,"Học phần "+term+" · Tuần "+weekNo);
+    for(Integer grade:r.getStemGrades()){
+     List<SchedulePlan> candidates=new ArrayList<>();
+     for(StemPlan p:baseByTerm.getOrDefault(term,List.of()))
+      if(p.getGrade().equals(grade))candidates.add(new SchedulePlan(p.getId(),p.getEffectiveFromWeek()==null?1:p.getEffectiveFromWeek(),p.getCourse()));
+     for(StemPlanVersion p:versionsByTerm.getOrDefault(term,List.of()))
+      if(p.getGrade().equals(grade))candidates.add(new SchedulePlan(p.getId(),p.getEffectiveFromWeek(),p.getCourse()));
+     SchedulePlan assigned=null;
+     for(SchedulePlan candidate:candidates)
+      if(candidate.effectiveWeek()<=weekNo&&(assigned==null||candidate.effectiveWeek()>=assigned.effectiveWeek()))assigned=candidate;
+     if(assigned==null)continue;
+     List<StemLesson> catalog=lessonsByCourse.getOrDefault(assigned.course().getId(),List.of());
+     Map<String,StemLesson> byId=catalog.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
+     List<String> ids=lessonOrders.getOrDefault(assigned.id(),List.of());List<StemLesson> ordered=new ArrayList<>();
+     for(String lessonId:ids)if(byId.containsKey(lessonId)&&ordered.stream().noneMatch(item->item.getId().equals(lessonId)))ordered.add(byId.get(lessonId));
+     for(StemLesson lesson:catalog)if(ordered.stream().noneMatch(item->item.getId().equals(lesson.getId())))ordered.add(lesson);
+     int assignedIndex=weekNo-assigned.effectiveWeek();
+     List<StemLesson> scheduledLessons=ordered.stream().filter(lesson->termLength!=8||!isStemEventLesson(lesson)).limit(termLength).toList();
+     if(assignedIndex>=0&&assignedIndex<scheduledLessons.size()){
+      StemLesson lesson=scheduledLessons.get(assignedIndex);
+      row.items.add(new ScheduleWeekResponse.Item(grade,assigned.course().getCode(),lesson.getTitle(),weekNo,term,original));
+     }
+    }
     scheduled=scheduled.plusWeeks(1);
-   }nextTerm=scheduled;
+   }
+   nextTerm=scheduled;
   }
+ }
+ private int termWeeks(Registration registration,int term){
+  Integer configured=registration.getStemTermWeeks()==null?null:registration.getStemTermWeeks().get(term);
+  return Integer.valueOf(8).equals(configured)?8:9;
+ }
+ private boolean isStemEventLesson(StemLesson lesson){
+  return lesson.getTitle()!=null&&lesson.getTitle().trim().toLowerCase(Locale.ROOT).equals("event tổng kết học phần");
  }
  private void buildDigital(Registration r,Map<LocalDate,MutableWeek> map,Set<LocalDate> closed){
   if(r.getDigitalStart()==null)return;LocalDate start=weekStart(r.getDigitalStart()),scheduled=start;

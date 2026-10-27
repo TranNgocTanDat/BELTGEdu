@@ -19,7 +19,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class StudyPlanService {
  private final RegistrationRepository registrations; private final SchoolRepository schools; private final UserRepository users;
- private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final DigitalPlanRepository digitalPlans; private final LessonProgressRepository progress;
+ private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans; private final LessonProgressRepository progress;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
  private final AnnouncementRepository announcements; private final SchoolClosureRepository closures; private final HolidayRepository holidays;
 
@@ -30,12 +30,12 @@ public class StudyPlanService {
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
  public RegistrationResponse create(RegistrationRequest req){ validate(req); School school=schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found")); assertAccess(current(),school); if(registrations.existsBySchool_IdAndAcademicYear(school.getId(),req.getAcademicYear().trim())) throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year"); Registration r=map(req,school,new Registration()); r=registrations.save(r); if(r.getDigitalProgram()!=null) for(Integer g:r.getDigitalGrades()) digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build()); return response(r); }
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
- public RegistrationResponse update(UUID id,RegistrationRequest req){ validate(req); Registration r=findRegistration(id); assertAccess(current(),r.getSchool()); School school=req.getSchoolId()==null?r.getSchool():schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found")); assertAccess(current(),school); if(registrations.existsBySchool_IdAndAcademicYearAndIdNot(school.getId(),req.getAcademicYear().trim(),id)) throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year"); reconcile(r,req); map(req,school,r); r=registrations.save(r); if(r.getDigitalProgram()!=null) for(Integer g:r.getDigitalGrades()) if(digitalPlans.findByRegistration_IdAndGrade(r.getId(),g).isEmpty()) digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build()); return response(r); }
+ public RegistrationResponse update(UUID id,RegistrationRequest req){ validate(req); Registration r=findRegistration(id); assertAccess(current(),r.getSchool()); School school=req.getSchoolId()==null?r.getSchool():schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found")); assertAccess(current(),school); if(registrations.existsBySchool_IdAndAcademicYearAndIdNot(school.getId(),req.getAcademicYear().trim(),id)) throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year"); validateStemTermWeekChange(r,req); reconcile(r,req); map(req,school,r); r=registrations.save(r); if(r.getDigitalProgram()!=null) for(Integer g:r.getDigitalGrades()) if(digitalPlans.findByRegistration_IdAndGrade(r.getId(),g).isEmpty()) digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build()); return response(r); }
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
  public void delete(UUID id){
   Registration r=findRegistration(id); assertAccess(current(),r.getSchool());
-  for(StemPlanVersion p:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemPlanVersions.delete(p);}
-  for(StemPlan p:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemPlans.delete(p);}
+  for(StemPlanVersion p:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlanVersions.delete(p);}
+  for(StemPlan p:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlans.delete(p);}
   for(DigitalPlan p:digitalPlans.findAllByRegistration_IdOrderByGradeAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("DIGITAL",p.getId());digitalPlans.delete(p);}
   announcements.deleteAllByRegistrationId(id.toString()); registrations.delete(r);
  }
@@ -51,7 +51,14 @@ public class StudyPlanService {
   stemPlanVersions.findAllByRegistration_IdInAndActiveTrueOrderByGradeAscTermAscEffectiveFromWeekAsc(ids).forEach(p->result.add(stemResponse(p)));
   result.sort(Comparator.comparing(StemPlanResponse::grade).thenComparing(StemPlanResponse::term)
           .thenComparing(StemPlanResponse::effectiveFromWeek).thenComparing(StemPlanResponse::version));
-  return result;
+  List<UUID> planIds=result.stream().map(StemPlanResponse::id).toList();
+  if(planIds.isEmpty())return result;
+  Map<UUID,List<String>> orderByPlan=new HashMap<>();
+  stemLessonOrders.findAllByPlanItemIdInOrderByPlanItemIdAscPositionAsc(planIds).forEach(item->
+          orderByPlan.computeIfAbsent(item.getPlanItemId(),key->new ArrayList<>()).add(item.getLessonId()));
+  return result.stream().map(item->new StemPlanResponse(item.id(),item.registrationId(),item.grade(),item.term(),
+          item.courseId(),item.effectiveFromWeek(),item.changeNote(),item.version(),
+          orderByPlan.getOrDefault(item.id(),List.of()))).toList();
  }
 
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
@@ -64,7 +71,7 @@ public class StudyPlanService {
   List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(r.getId(),grade,term);
   int safeWeek=firstEditableStemWeek(r,term,base,versions);
   int requestedWeek=req.getEffectiveFromWeek()==null?safeWeek:req.getEffectiveFromWeek();
-  if(requestedWeek<1||requestedWeek>9)throw bad("effectiveFromWeek must be between 1 and 9");
+  if(requestedWeek<1||requestedWeek>termWeeks(r,term))throw bad("effectiveFromWeek must be between 1 and "+termWeeks(r,term));
   if(requestedWeek!=safeWeek)throw new ResponseStatusException(HttpStatus.CONFLICT,
           "Khóa học chỉ được đổi từ tuần chưa báo/hoàn thành tiếp theo: tuần "+safeWeek+".");
 
@@ -74,7 +81,7 @@ public class StudyPlanService {
    if(base==null&&versions.isEmpty())return null;
    if(safeWeek>1||hasAnyProgress||!versions.isEmpty())
     throw new ResponseStatusException(HttpStatus.CONFLICT,"Kế hoạch đã có lịch sử hoặc tiến độ. Hãy chọn khóa học thay thế để giữ nguyên dữ liệu.");
-   if(base!=null){progress.deleteAllByPlanTypeAndPlanItemId("STEM",base.getId());stemPlans.delete(base);}
+   if(base!=null){progress.deleteAllByPlanTypeAndPlanItemId("STEM",base.getId());stemLessonOrders.deleteAllByPlanItemId(base.getId());stemPlans.delete(base);}
    return null;
   }
 
@@ -110,6 +117,7 @@ public class StudyPlanService {
   boolean baseCanStartHere=base!=null&&base.getEffectiveFromWeek()>=requestedWeek
           &&progress.findAllByPlanTypeAndPlanItemId("STEM",base.getId()).isEmpty();
   if(baseCanStartHere){
+   if(!base.getCourse().getId().equals(course.getId()))stemLessonOrders.deleteAllByPlanItemId(base.getId());
    base.setEffectiveFromWeek(requestedWeek);base.setCourse(course);base.setChangeNote(note);
    return stemResponse(stemPlans.save(base));
   }
@@ -117,11 +125,74 @@ public class StudyPlanService {
   StemPlanVersion reusable=versions.stream().filter(v->v.getEffectiveFromWeek().equals(requestedWeek))
           .max(Comparator.comparing(StemPlanVersion::getId)).orElse(null);
   if(reusable!=null){
+   if(!reusable.getCourse().getId().equals(course.getId()))stemLessonOrders.deleteAllByPlanItemId(reusable.getId());
    reusable.setCourse(course);reusable.setChangeNote(note);reusable.setActive(true);
    return stemResponse(stemPlanVersions.save(reusable));
   }
   return stemResponse(stemPlanVersions.save(StemPlanVersion.builder().registration(r).grade(grade).term(term)
           .course(course).effectiveFromWeek(requestedWeek).changeNote(note).active(true).build()));
+ }
+
+ @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
+ public StemPlanResponse setStemLessonOrder(StemPlanLessonOrderRequest req){
+  if(req==null||req.getRegistrationId()==null||req.getGrade()==null||req.getTerm()==null||req.getPlanItemId()==null
+          ||req.getLessonIds()==null||req.getLessonIds().isEmpty())throw bad("registrationId, grade, term, planItemId and lessonIds are required");
+  Registration r=findRegistration(req.getRegistrationId());assertAccess(current(),r.getSchool());
+  int grade=req.getGrade(),term=req.getTerm();
+  if(term<1||term>4)throw bad("term must be between 1 and 4");
+  if(r.getStemProgram()==null||!r.getStemGrades().contains(grade))throw bad("Grade is not enrolled in STEM");
+  StemPlan base=stemPlans.findByRegistration_IdAndGradeAndTerm(r.getId(),grade,term).orElse(null);
+  List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(r.getId(),grade,term);
+  StemPlanVersion assignment=null;
+  if(base!=null&&base.getId().equals(req.getPlanItemId()))
+   assignment=StemPlanVersion.builder().id(base.getId()).registration(base.getRegistration()).grade(base.getGrade()).term(base.getTerm())
+           .course(base.getCourse()).effectiveFromWeek(base.getEffectiveFromWeek()==null?1:base.getEffectiveFromWeek()).changeNote(base.getChangeNote()).active(true).build();
+  if(assignment==null)assignment=versions.stream().filter(v->v.getId().equals(req.getPlanItemId())&&v.isActive()).findFirst()
+          .orElseThrow(()->notFound("STEM plan assignment not found or inactive"));
+  if(!assignment.getGrade().equals(grade)||!assignment.getTerm().equals(term))throw bad("The STEM plan assignment does not match grade and term");
+  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
+  if(lessons.isEmpty())throw new ResponseStatusException(HttpStatus.CONFLICT,"Khóa học chưa có bài học để sắp xếp.");
+  int termLength=termWeeks(r,term);
+  List<String> canonical=lessons.stream().map(StemLesson::getId).toList();
+  if(req.getLessonIds().size()!=canonical.size()||new HashSet<>(req.getLessonIds()).size()!=canonical.size()
+          ||!new HashSet<>(req.getLessonIds()).equals(new HashSet<>(canonical)))
+   throw bad("lessonIds must contain each lesson in the assigned course exactly once");
+  List<String> storedOrder=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(assignment.getId()).stream()
+          .map(StemPlanLessonOrder::getLessonId).toList();
+  List<String> currentOrder=new ArrayList<>();
+  for(String lessonId:storedOrder)if(canonical.contains(lessonId)&&!currentOrder.contains(lessonId))currentOrder.add(lessonId);
+  for(String lessonId:canonical)if(!currentOrder.contains(lessonId))currentOrder.add(lessonId);
+  List<String> currentScheduledOrder=scheduledLessonIds(currentOrder,lessons,termLength);
+  List<String> requestedScheduledOrder=scheduledLessonIds(req.getLessonIds(),lessons,termLength);
+  List<LocalDate> weeks=scheduledStemWeeks(r,term);
+  if(weeks.size()!=termLength)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể xác định đủ số tuần của học phần.");
+  int start=assignment.getEffectiveFromWeek();
+  int end=termLength;
+  for(StemPlanVersion other:versions)
+   if(other.isActive()&&other.getEffectiveFromWeek()>start)end=Math.min(end,other.getEffectiveFromWeek()-1);
+  if(start>end)throw new ResponseStatusException(HttpStatus.CONFLICT,"Phân đoạn khóa học không có tuần hợp lệ để sắp xếp.");
+  for(int weekNo=start;weekNo<=end;weekNo++){
+   int position=weekNo-start;
+   if(position>=currentScheduledOrder.size()||position>=requestedScheduledOrder.size())break;
+   boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+weeks.get(weekNo-1)).isPresent();
+   String lessonId=currentScheduledOrder.get(position);
+   Optional<LessonProgress> saved=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),lessonId);
+   protectedWeek|=saved.isPresent()&&!"TODO".equalsIgnoreCase(saved.get().getStatus());
+   if(protectedWeek&&!currentScheduledOrder.get(position).equals(requestedScheduledOrder.get(position)))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi thứ tự bài thuộc tuần đã báo hoặc đã có tiến độ.");
+  }
+  for(LessonProgress saved:progress.findAllByPlanTypeAndPlanItemId("STEM",assignment.getId()))
+   if(!"TODO".equalsIgnoreCase(saved.getStatus())&&currentOrder.indexOf(saved.getLessonId())!=req.getLessonIds().indexOf(saved.getLessonId()))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể di chuyển bài đã có tiến độ.");
+  stemLessonOrders.deleteAllByPlanItemId(assignment.getId());
+  List<StemPlanLessonOrder> rows=new ArrayList<>();
+  for(int i=0;i<req.getLessonIds().size();i++)rows.add(StemPlanLessonOrder.builder()
+          .planItemId(assignment.getId()).lessonId(req.getLessonIds().get(i)).position(i+1).build());
+  stemLessonOrders.saveAll(rows);
+  boolean isVersion=false;
+  for(StemPlanVersion version:versions)if(version.getId().equals(assignment.getId())){isVersion=true;break;}
+  return new StemPlanResponse(assignment.getId(),r.getId(),grade,term,assignment.getCourse().getId(),start,
+          assignment.getChangeNote(),isVersion,req.getLessonIds());
  }
 
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional(readOnly=true)
@@ -172,16 +243,30 @@ public class StudyPlanService {
 
 
 
- private Registration map(RegistrationRequest q,School s,Registration r){r.setSchool(s);r.setAcademicYear(q.getAcademicYear().trim()); RegistrationRequest.StemConfig st=q.getStem(); r.setStemProgram(st==null?null:st.getProgram());r.setStemGrades(st==null?new LinkedHashSet<>():new LinkedHashSet<>(st.getGrades()));r.setTerm1Start(st==null?null:st.getTerm1Start());r.setTerm2Start(st==null?null:st.getTerm2Start());r.setTerm3Start(st==null?null:st.getTerm3Start());r.setTerm4Start(st==null?null:st.getTerm4Start());r.setStemStudyDay(st==null?null:st.getStudyDay()); RegistrationRequest.DigitalConfig d=q.getDigital();r.setDigitalProgram(d==null?null:d.getProgram());r.setDigitalGrades(d==null?new LinkedHashSet<>():new LinkedHashSet<>(d.getGrades()));r.setDigitalStart(d==null?null:d.getStartDate());r.setDigitalStudyDay(d==null?null:d.getStudyDay());return r;}
+ private Registration map(RegistrationRequest q,School s,Registration r){
+  r.setSchool(s);r.setAcademicYear(q.getAcademicYear().trim());
+  RegistrationRequest.StemConfig st=q.getStem();
+  r.setStemProgram(st==null?null:st.getProgram());
+  r.setStemGrades(st==null?new LinkedHashSet<>():new LinkedHashSet<>(st.getGrades()));
+  r.setTerm1Start(st==null?null:st.getTerm1Start());r.setTerm2Start(st==null?null:st.getTerm2Start());
+  r.setTerm3Start(st==null?null:st.getTerm3Start());r.setTerm4Start(st==null?null:st.getTerm4Start());
+  Map<Integer,Integer> configuredTermWeeks=st==null?new LinkedHashMap<>():normalizeTermWeeks(st.getTermWeeks(),r.getStemTermWeeks());
+  if(r.getStemTermWeeks()==null)r.setStemTermWeeks(new LinkedHashMap<>());else r.getStemTermWeeks().clear();
+  r.getStemTermWeeks().putAll(configuredTermWeeks);
+  r.setStemStudyDay(st==null?null:st.getStudyDay());
+  RegistrationRequest.DigitalConfig d=q.getDigital();
+  r.setDigitalProgram(d==null?null:d.getProgram());r.setDigitalGrades(d==null?new LinkedHashSet<>():new LinkedHashSet<>(d.getGrades()));
+  r.setDigitalStart(d==null?null:d.getStartDate());r.setDigitalStudyDay(d==null?null:d.getStudyDay());return r;
+ }
  private void reconcile(Registration r,RegistrationRequest q){
   Set<Integer> newStem=q.getStem()==null?Set.of():q.getStem().getGrades();
   for(StemPlan p:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(r.getId()))
    if(q.getStem()==null||!newStem.contains(p.getGrade())||q.getStem().getProgram()!=r.getStemProgram()){
-    progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemPlans.delete(p);
+    progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlans.delete(p);
    }
   for(StemPlanVersion p:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(r.getId()))
    if(q.getStem()==null||!newStem.contains(p.getGrade())||q.getStem().getProgram()!=r.getStemProgram()){
-    progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemPlanVersions.delete(p);
+    progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlanVersions.delete(p);
    }
   Set<Integer> newDigital=q.getDigital()==null?Set.of():q.getDigital().getGrades();
   for(DigitalPlan p:digitalPlans.findAllByRegistration_IdOrderByGradeAsc(r.getId()))
@@ -190,32 +275,154 @@ public class StudyPlanService {
    }
  }
 
+ private int termWeeks(Registration r,int term){
+  return termWeeks(r.getStemTermWeeks(),term);
+ }
+
+ private int termWeeks(Map<Integer,Integer> termWeeks,int term){
+  Integer configured=termWeeks==null?null:termWeeks.get(term);
+  return Integer.valueOf(8).equals(configured)?8:9;
+ }
+
+ private Map<Integer,Integer> normalizeTermWeeks(Map<Integer,Integer> supplied,Map<Integer,Integer> fallback){
+  Map<Integer,Integer> result=new LinkedHashMap<>();
+  for(int term=1;term<=4;term++){
+   Integer weeks=supplied==null?null:supplied.get(term);
+   if(weeks==null&&fallback!=null)weeks=fallback.get(term);
+   result.put(term,Integer.valueOf(8).equals(weeks)?8:9);
+  }
+  return result;
+ }
+
+ private List<String> scheduledLessonIds(StemPlanVersion assignment,int termLength){
+  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
+  List<String> stored=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(assignment.getId()).stream()
+          .map(StemPlanLessonOrder::getLessonId).toList();
+  return scheduledLessonIds(stored,lessons,termLength);
+ }
+
+ private List<String> scheduledLessonIds(UUID planItemId,List<StemLesson> lessons,int termLength){
+  List<String> stored=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(planItemId).stream()
+          .map(StemPlanLessonOrder::getLessonId).toList();
+  return scheduledLessonIds(stored,lessons,termLength);
+ }
+
+ private List<String> scheduledLessonIds(List<String> requestedOrder,List<StemLesson> lessons,int termLength){
+  List<String> canonical=lessons.stream().map(StemLesson::getId).toList();
+  Map<String,StemLesson> byId=lessons.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
+  List<String> ordered=new ArrayList<>();
+  if(requestedOrder!=null)for(String lessonId:requestedOrder)
+   if(byId.containsKey(lessonId)&&!ordered.contains(lessonId))ordered.add(lessonId);
+  for(String lessonId:canonical)if(!ordered.contains(lessonId))ordered.add(lessonId);
+  return ordered.stream().filter(id->termLength!=8||!isStemEventLesson(byId.get(id))).limit(termLength).toList();
+ }
+
+ private boolean isStemEventLesson(StemLesson lesson){
+  return lesson!=null&&lesson.getTitle()!=null&&lesson.getTitle().trim().toLowerCase(Locale.ROOT).equals("event tổng kết học phần");
+ }
+
+ private void validateStemTermWeekChange(Registration registration,RegistrationRequest request){
+  if(registration.getStemProgram()==null||request.getStem()==null)return;
+  Map<Integer,Integer> oldWeeks=normalizeTermWeeks(registration.getStemTermWeeks(),null);
+  Map<Integer,Integer> newWeeks=normalizeTermWeeks(request.getStem().getTermWeeks(),oldWeeks);
+  for(int term=1;term<=4;term++){
+   int oldLength=oldWeeks.get(term),newLength=newWeeks.get(term);
+   if(oldLength==newLength)continue;
+   List<LocalDate> oldDates=scheduledStemWeeks(registration,term,oldWeeks);
+   List<LocalDate> newDates=scheduledStemWeeks(registration,term,newWeeks);
+   if(hasHistoryOnChangedStemSlots(registration,term,oldLength,newLength,oldDates,newDates))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì lịch bài tại một tuần đã báo hoặc có tiến độ sẽ thay đổi.");
+   if(newLength<oldLength){
+    final int changedTerm=term;
+    if(stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(registration.getId()).stream()
+            .anyMatch(plan->plan.getTerm()==changedTerm&&plan.getEffectiveFromWeek()>newLength)
+       ||stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(registration.getId()).stream()
+            .anyMatch(plan->plan.getTerm()==changedTerm&&plan.isActive()&&plan.getEffectiveFromWeek()>newLength))
+     throw new ResponseStatusException(HttpStatus.CONFLICT,"Có kế hoạch đổi khóa bắt đầu sau tuần "+newLength+"; hãy xử lý kế hoạch đó trước khi rút ngắn học phần.");
+   }
+   for(int later=term+1;later<=4;later++){
+    for(LocalDate date:scheduledStemWeeks(registration,later))
+     if(announcements.findByKey(registration.getId()+":stem:"+date).isPresent())
+      throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có báo bài; cần giữ nguyên ngày lịch sử.");
+    if(hasProgressInTerm(registration,later))
+     throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có tiến độ; cần giữ nguyên kế hoạch lịch sử.");
+   }
+  }
+ }
+
+ private boolean hasHistoryOnChangedStemSlots(Registration registration,int term,int oldLength,int newLength,List<LocalDate> oldDates,List<LocalDate> newDates){
+  int lastWeek=Math.max(oldLength,newLength);
+  for(Integer grade:registration.getStemGrades()){
+   StemPlan base=stemPlans.findByRegistration_IdAndGradeAndTerm(registration.getId(),grade,term).orElse(null);
+   List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(registration.getId(),grade,term);
+   List<StemPlanVersion> assignments=new ArrayList<>(versions.stream().filter(StemPlanVersion::isActive).toList());
+   if(base!=null)assignments.add(StemPlanVersion.builder().id(base.getId()).registration(base.getRegistration()).grade(base.getGrade()).term(base.getTerm())
+           .course(base.getCourse()).effectiveFromWeek(base.getEffectiveFromWeek()==null?1:base.getEffectiveFromWeek()).changeNote(base.getChangeNote()).active(true).build());
+   Map<UUID,List<String>> beforeByPlan=new HashMap<>(),afterByPlan=new HashMap<>();
+   for(StemPlanVersion item:assignments){
+    List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(item.getCourse().getId());
+    List<String> stored=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(item.getId()).stream().map(StemPlanLessonOrder::getLessonId).toList();
+    beforeByPlan.put(item.getId(),scheduledLessonIds(stored,lessons,oldLength));
+    afterByPlan.put(item.getId(),scheduledLessonIds(stored,lessons,newLength));
+   }
+   for(int weekNo=1;weekNo<=lastWeek;weekNo++){
+    StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);if(assignment==null)continue;
+    int lessonIndex=weekNo-assignment.getEffectiveFromWeek();
+    List<String> before=beforeByPlan.getOrDefault(assignment.getId(),List.of()),after=afterByPlan.getOrDefault(assignment.getId(),List.of());
+    String beforeId=lessonIndex>=0&&lessonIndex<before.size()?before.get(lessonIndex):null;
+    String afterId=lessonIndex>=0&&lessonIndex<after.size()?after.get(lessonIndex):null;
+    if(Objects.equals(beforeId,afterId))continue;
+    LocalDate oldDate=weekNo<=oldDates.size()?oldDates.get(weekNo-1):null;
+    LocalDate newDate=weekNo<=newDates.size()?newDates.get(weekNo-1):null;
+    if(oldDate!=null&&announcements.findByKey(registration.getId()+":stem:"+oldDate).isPresent())return true;
+    if(newDate!=null&&!Objects.equals(newDate,oldDate)&&announcements.findByKey(registration.getId()+":stem:"+newDate).isPresent())return true;
+    if(beforeId!=null&&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),beforeId).isPresent())return true;
+    if(afterId!=null&&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),afterId).isPresent())return true;
+   }
+  }
+  return false;
+ }
+
+ private boolean hasProgressInTerm(Registration registration,int term){
+  for(StemPlan plan:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(registration.getId()))
+   if(plan.getTerm()==term&&!progress.findAllByPlanTypeAndPlanItemId("STEM",plan.getId()).isEmpty())return true;
+  for(StemPlanVersion plan:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(registration.getId()))
+   if(plan.getTerm()==term&&!progress.findAllByPlanTypeAndPlanItemId("STEM",plan.getId()).isEmpty())return true;
+  return false;
+ }
+
   private int firstEditableStemWeek(Registration r,int term,StemPlan base,List<StemPlanVersion> versions){
+  int termLength=termWeeks(r,term);
   List<LocalDate> weeks=scheduledStemWeeks(r,term);
-  if(weeks.size()!=9){
+  if(weeks.size()!=termLength){
    boolean hasProgress=base!=null&&!progress.findAllByPlanTypeAndPlanItemId("STEM",base.getId()).isEmpty()
            ||versions.stream().anyMatch(v->!progress.findAllByPlanTypeAndPlanItemId("STEM",v.getId()).isEmpty());
    if(hasProgress)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể xác định tuần đổi khóa vì đăng ký chưa có đủ lịch học.");
    return 1;
   }
   int lastProtected=0;
-  for(int weekNo=1;weekNo<=9;weekNo++){
+  for(int weekNo=1;weekNo<=termLength;weekNo++){
    LocalDate weekStart=weeks.get(weekNo-1);
    boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+weekStart).isPresent();
    StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);
    if(!protectedWeek&&assignment!=null){
     int lessonIndex=weekNo-assignment.getEffectiveFromWeek();
     List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
-    if(lessonIndex>=0&&lessonIndex<lessons.size())
-     protectedWeek=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),lessons.get(lessonIndex).getId()).isPresent();
+    List<String> order=scheduledLessonIds(assignment.getId(),lessons,termLength);
+    if(lessonIndex>=0&&lessonIndex<order.size())
+     protectedWeek=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),order.get(lessonIndex)).isPresent();
    }
    if(protectedWeek)lastProtected=weekNo;
   }
-  if(lastProtected>=9)throw new ResponseStatusException(HttpStatus.CONFLICT,"Cả 9 tuần của học phần đã được báo hoặc có tiến độ; không còn tuần để đổi khóa.");
+  if(lastProtected>=termLength)throw new ResponseStatusException(HttpStatus.CONFLICT,"Cả "+termLength+" tuần của học phần đã được báo hoặc có tiến độ; không còn tuần để đổi khóa.");
   return lastProtected+1;
  }
 
  private List<LocalDate> scheduledStemWeeks(Registration r,int targetTerm){
+  return scheduledStemWeeks(r,targetTerm,r.getStemTermWeeks());
+ }
+
+ private List<LocalDate> scheduledStemWeeks(Registration r,int targetTerm,Map<Integer,Integer> termLengths){
   Set<LocalDate> closedWeeks=new HashSet<>(closures.findAllBySchool_IdOrderByWeekStartAsc(r.getSchool().getId()).stream().map(SchoolClosure::getWeekStart).toList());
   List<Holiday> holidayList=holidays.findAll();
   List<LocalDate> result=new ArrayList<>();
@@ -225,7 +432,7 @@ public class StudyPlanService {
    if(configured==null)continue;
    LocalDate scheduled=weekStartOf(configured);
    if(nextTermWeek!=null&&nextTermWeek.isAfter(scheduled))scheduled=nextTermWeek;
-   for(int i=1;i<=9;i++){
+   for(int i=1;i<=termWeeks(termLengths,term);i++){
     int guard=0;
     while(isClosedStemWeek(scheduled,closedWeeks,holidayList,r.getStemStudyDay())&&guard++<52)scheduled=scheduled.plusWeeks(1);
     if(term==targetTerm)result.add(scheduled);
@@ -268,14 +475,14 @@ public class StudyPlanService {
 
  private StemPlanResponse stemResponse(StemPlan p){
   return new StemPlanResponse(p.getId(),p.getRegistration().getId(),p.getGrade(),p.getTerm(),p.getCourse().getId(),
-          p.getEffectiveFromWeek()==null?1:p.getEffectiveFromWeek(),p.getChangeNote(),false);
+          p.getEffectiveFromWeek()==null?1:p.getEffectiveFromWeek(),p.getChangeNote(),false,List.of());
  }
  private StemPlanResponse stemResponse(StemPlanVersion p){
   return new StemPlanResponse(p.getId(),p.getRegistration().getId(),p.getGrade(),p.getTerm(),p.getCourse().getId(),
-          p.getEffectiveFromWeek(),p.getChangeNote(),true);
+          p.getEffectiveFromWeek(),p.getChangeNote(),true,List.of());
  }
- private void validate(RegistrationRequest q){if(q==null||q.getSchoolId()==null) throw bad("schoolId is required"); if(q.getAcademicYear()==null||!q.getAcademicYear().matches("\\d{4}-\\d{4}")) throw bad("academicYear must look like 2026-2027"); if(q.getStem()==null&&q.getDigital()==null) throw bad("At least one program must be registered"); if(q.getStem()!=null&&(q.getStem().getProgram()==null||q.getStem().getGrades()==null||q.getStem().getGrades().isEmpty())) throw bad("STEM program and grades are required"); if(q.getDigital()!=null&&(q.getDigital().getProgram()==null||q.getDigital().getGrades()==null||q.getDigital().getGrades().isEmpty())) throw bad("Digital program and grades are required"); if(q.getStem()!=null&&q.getStem().getStudyDay()!=null&&Set.of(java.time.DayOfWeek.SATURDAY,java.time.DayOfWeek.SUNDAY).contains(q.getStem().getStudyDay())) throw bad("STEM studyDay must be a weekday"); if(q.getDigital()!=null&&q.getDigital().getStudyDay()!=null&&Set.of(java.time.DayOfWeek.SATURDAY,java.time.DayOfWeek.SUNDAY).contains(q.getDigital().getStudyDay())) throw bad("Digital studyDay must be a weekday"); School school=schools.findById(q.getSchoolId()).orElseThrow(()->notFound("School not found")); Set<Integer> allowed=switch(school.getLevel()){case PRIMARY->Set.of(1,2,3,4,5);case MIDDLE->Set.of(6,7,8,9);case HIGH->Set.of(10,11,12);}; if(q.getStem()!=null&&!allowed.containsAll(q.getStem().getGrades())) throw bad("STEM grades must match school level"); if(q.getDigital()!=null&&!allowed.containsAll(q.getDigital().getGrades())) throw bad("Digital grades must match school level"); }
- private RegistrationResponse response(Registration r){ RegistrationResponse.Stem st=r.getStemProgram()==null?null:new RegistrationResponse.Stem(r.getStemProgram(),sorted(r.getStemGrades()),starts(r),r.getStemStudyDay()); RegistrationResponse.Digital d=r.getDigitalProgram()==null?null:new RegistrationResponse.Digital(r.getDigitalProgram(),sorted(r.getDigitalGrades()),r.getDigitalStart(),r.getDigitalStudyDay());return new RegistrationResponse(r.getId(),r.getSchool().getId(),r.getAcademicYear(),st,d); }
+ private void validate(RegistrationRequest q){if(q==null||q.getSchoolId()==null) throw bad("schoolId is required"); if(q.getAcademicYear()==null||!q.getAcademicYear().matches("\\d{4}-\\d{4}")) throw bad("academicYear must look like 2026-2027"); if(q.getStem()==null&&q.getDigital()==null) throw bad("At least one program must be registered"); if(q.getStem()!=null&&(q.getStem().getProgram()==null||q.getStem().getGrades()==null||q.getStem().getGrades().isEmpty())) throw bad("STEM program and grades are required"); if(q.getDigital()!=null&&(q.getDigital().getProgram()==null||q.getDigital().getGrades()==null||q.getDigital().getGrades().isEmpty())) throw bad("Digital program and grades are required"); if(q.getStem()!=null&&q.getStem().getStudyDay()!=null&&Set.of(java.time.DayOfWeek.SATURDAY,java.time.DayOfWeek.SUNDAY).contains(q.getStem().getStudyDay())) throw bad("STEM studyDay must be a weekday"); if(q.getDigital()!=null&&q.getDigital().getStudyDay()!=null&&Set.of(java.time.DayOfWeek.SATURDAY,java.time.DayOfWeek.SUNDAY).contains(q.getDigital().getStudyDay())) throw bad("Digital studyDay must be a weekday"); if(q.getStem()!=null&&q.getStem().getTermWeeks()!=null&&q.getStem().getTermWeeks().values().stream().anyMatch(value->value==null||(value!=8&&value!=9))) throw bad("Each STEM term must be 8 or 9 weeks"); School school=schools.findById(q.getSchoolId()).orElseThrow(()->notFound("School not found")); Set<Integer> allowed=switch(school.getLevel()){case PRIMARY->Set.of(1,2,3,4,5);case MIDDLE->Set.of(6,7,8,9);case HIGH->Set.of(10,11,12);}; if(q.getStem()!=null&&!allowed.containsAll(q.getStem().getGrades())) throw bad("STEM grades must match school level"); if(q.getDigital()!=null&&!allowed.containsAll(q.getDigital().getGrades())) throw bad("Digital grades must match school level"); }
+ private RegistrationResponse response(Registration r){ RegistrationResponse.Stem st=r.getStemProgram()==null?null:new RegistrationResponse.Stem(r.getStemProgram(),sorted(r.getStemGrades()),starts(r),normalizeTermWeeks(r.getStemTermWeeks(),null),r.getStemStudyDay()); RegistrationResponse.Digital d=r.getDigitalProgram()==null?null:new RegistrationResponse.Digital(r.getDigitalProgram(),sorted(r.getDigitalGrades()),r.getDigitalStart(),r.getDigitalStudyDay());return new RegistrationResponse(r.getId(),r.getSchool().getId(),r.getAcademicYear(),st,d); }
  private Map<Integer,LocalDate> starts(Registration r){Map<Integer,LocalDate> m=new LinkedHashMap<>(); if(r.getTerm1Start()!=null)m.put(1,r.getTerm1Start());if(r.getTerm2Start()!=null)m.put(2,r.getTerm2Start());if(r.getTerm3Start()!=null)m.put(3,r.getTerm3Start());if(r.getTerm4Start()!=null)m.put(4,r.getTerm4Start());return m;}
  private List<Integer> sorted(Set<Integer> x){return x==null?List.of():x.stream().sorted().toList();} 
  private LessonProgressResponse progressResponse(LessonProgress x,UUID reg){return new LessonProgressResponse(x.getId(),x.getPlanItemId()+":"+x.getLessonId(),reg,x.getPlanItemId(),x.getPlanType(),x.getLessonId(),x.getStatus(),x.getDate());}
