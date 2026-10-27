@@ -46,6 +46,11 @@ public class ReportWorkController {
         return APIResponse.<ReportWorkResponse>builder().result(service.extend(id, request)).build();
     }
 
+    @PostMapping("/{id}/deadline-changes")
+    public APIResponse<ReportWorkResponse> changeDeadline(@PathVariable UUID id, @Valid @RequestBody ReportWorkExtensionRequest request) {
+        return APIResponse.<ReportWorkResponse>builder().result(service.changeDeadline(id, request)).build();
+    }
+
     @PostMapping("/{id}/deadline-adjustments")
     public APIResponse<ReportWorkResponse> adjustCompletedDeadline(@PathVariable UUID id, @Valid @RequestBody ReportWorkDeadlineAdjustmentRequest request) {
         return APIResponse.<ReportWorkResponse>builder().result(service.adjustCompletedDeadline(id, request)).build();

@@ -36,6 +36,7 @@ public class StemCurriculumService {
     private final StemCourseRepository courseRepository;
     private final StemLessonRepository lessonRepository;
     private final StemPlanRepository planRepository;
+    private final com.example.beprojectweb.repository.StemPlanVersionRepository planVersionRepository;
     private final LessonProgressRepository progressRepository;
 
     @Transactional(readOnly = true)
@@ -101,7 +102,7 @@ public class StemCurriculumService {
     public void deleteCourse(String id) {
         StemCourse course = courseRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM course not found"));
-        if (planRepository.existsByCourse_Id(id)) {
+        if (planRepository.existsByCourse_Id(id) || planVersionRepository.existsByCourse_Id(id)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Khóa học đang được kế hoạch học sử dụng, không thể xóa.");
         }
         List<StemLesson> lessons = lessonRepository.findAllByCourse_IdOrderByLessonOrderAsc(id);

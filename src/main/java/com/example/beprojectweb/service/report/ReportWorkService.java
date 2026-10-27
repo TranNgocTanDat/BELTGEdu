@@ -90,6 +90,37 @@ public class ReportWorkService {
     }
 
     @Transactional
+    public ReportWorkResponse changeDeadline(UUID id, ReportWorkExtensionRequest request) {
+        ReportWork work = workRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report work item not found"));
+        if (work.getCompletedDate() != null || "Hoàn thành".equals(work.getStatus()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Không thể đổi hạn của công việc đã hoàn thành");
+        if (work.getOriginalDueDate() == null || work.getCurrentDueDate() == null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Công việc chưa có hạn hoàn thành");
+        if (work.getStartDate() != null && request.getNewDueDate().isBefore(work.getStartDate()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hạn mới không được trước ngày bắt đầu");
+        if (request.getNewDueDate().equals(work.getCurrentDueDate()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hạn mới đang trùng với hạn hiện tại");
+
+        int comparisonWithOriginal = request.getNewDueDate().compareTo(work.getOriginalDueDate());
+        String changeType = comparisonWithOriginal < 0 ? "SHORTENING"
+                : comparisonWithOriginal > 0 ? "EXTENSION" : "RESET";
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        ReportWorkExtension change = new ReportWorkExtension();
+        change.setWork(work);
+        change.setCreatedAt(LocalDateTime.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")));
+        change.setPreviousDueDate(work.getCurrentDueDate());
+        change.setNewDueDate(request.getNewDueDate());
+        change.setReason(request.getReason().trim());
+        change.setExtendedBy(username);
+        change.setChangeType(changeType);
+        work.getExtensions().add(change);
+        extensionRepository.save(change);
+        work.setCurrentDueDate(request.getNewDueDate());
+        return toResponse(workRepository.save(work));
+    }
+
+    @Transactional
     @PreAuthorize("hasRole('ADMIN')")
     public ReportWorkResponse adjustCompletedDeadline(UUID id, ReportWorkDeadlineAdjustmentRequest request) {
         ReportWork work = workRepository.findById(id)
@@ -186,14 +217,18 @@ public class ReportWorkService {
 
     private String deadlineResult(ReportWork work) {
         if (work.getCompletedDate() != null) {
-            if (work.getOriginalDueDate() != null && !work.getCompletedDate().isAfter(work.getOriginalDueDate())) return "Đúng hạn ban đầu";
-            if (work.getCurrentDueDate() != null && !work.getCompletedDate().isAfter(work.getCurrentDueDate())) {
-                ReportWorkExtension latestChange = work.getExtensions().stream()
-                        .max(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt)).orElse(null);
-                return latestChange != null && "ADMIN_CORRECTION".equals(latestChange.getChangeType())
-                        ? "Đúng hạn sau điều chỉnh" : "Đúng hạn sau gia hạn";
-            }
-            return "Hoàn thành trễ";
+            ReportWorkExtension latestChange = work.getExtensions().stream()
+                    .max(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt)).orElse(null);
+            LocalDate effectiveDueDate = work.getCurrentDueDate();
+            if (effectiveDueDate != null && work.getCompletedDate().isAfter(effectiveDueDate)) return "Hoàn thành trễ";
+            String changeType = latestChange == null ? null : latestChange.getChangeType();
+            if ("ADMIN_CORRECTION".equals(changeType) && work.getOriginalDueDate() != null
+                    && work.getCompletedDate().isAfter(work.getOriginalDueDate())) return "Đúng hạn sau điều chỉnh";
+            if ("SHORTENING".equals(changeType)) return "Đúng hạn theo hạn rút ngắn";
+            if (("EXTENSION".equals(changeType) || changeType == null) && latestChange != null
+                    && work.getOriginalDueDate() != null && work.getCompletedDate().isAfter(work.getOriginalDueDate()))
+                return "Đúng hạn sau gia hạn";
+            return "Đúng hạn ban đầu";
         }
         return work.getCurrentDueDate() != null && LocalDate.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")).isAfter(work.getCurrentDueDate()) ? "Quá hạn" : "Trong hạn";
     }

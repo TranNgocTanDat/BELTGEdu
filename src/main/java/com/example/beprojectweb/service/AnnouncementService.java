@@ -47,6 +47,7 @@ public class AnnouncementService {
     private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
     private final StemPlanRepository stemPlanRepository;
+    private final com.example.beprojectweb.repository.StemPlanVersionRepository stemPlanVersionRepository;
     private final DigitalPlanRepository digitalPlanRepository;
     private final StemLessonRepository stemLessonRepository;
     private final DigitalLessonRepository digitalLessonRepository;
@@ -147,10 +148,21 @@ public class AnnouncementService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lesson progress target");
             }
             if (expectedType.equals("STEM")) {
-                StemPlan plan = stemPlanRepository.findById(target.getPlanItemId())
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found"));
-                if (!plan.getRegistration().getId().equals(registration.getId())
-                        || !stemLessonRepository.existsByIdAndCourse_Id(target.getLessonId(), plan.getCourse().getId())) {
+                StemPlan plan = stemPlanRepository.findById(target.getPlanItemId()).orElse(null);
+                String courseId;
+                UUID planRegistrationId;
+                if (plan != null) {
+                    courseId = plan.getCourse().getId();
+                    planRegistrationId = plan.getRegistration().getId();
+                } else {
+                    com.example.beprojectweb.entity.StemPlanVersion version = stemPlanVersionRepository.findById(target.getPlanItemId())
+                            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found"));
+                    if (!version.isActive()) throw new ResponseStatusException(HttpStatus.CONFLICT, "This STEM plan assignment is no longer active");
+                    courseId = version.getCourse().getId();
+                    planRegistrationId = version.getRegistration().getId();
+                }
+                if (!planRegistrationId.equals(registration.getId())
+                        || !stemLessonRepository.existsByIdAndCourse_Id(target.getLessonId(), courseId)) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lesson does not belong to this registration plan");
                 }
             } else {

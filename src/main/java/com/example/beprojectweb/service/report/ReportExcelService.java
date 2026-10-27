@@ -107,11 +107,18 @@ public class ReportExcelService {
             long completedWork = workRows.stream().filter(row -> "Hoàn thành".equals(row.get(8))).count();
             long onTimeOriginal = workRows.stream().filter(row -> "Đúng hạn ban đầu".equals(row.get(9))).count();
             long onTimeExtended = workRows.stream().filter(row -> "Đúng hạn sau gia hạn".equals(row.get(9))).count();
+            long onTimeShortened = workRows.stream().filter(row -> "Đúng hạn theo hạn rút ngắn".equals(row.get(9))).count();
             long onTimeAdjusted = workRows.stream().filter(row -> "Đúng hạn sau điều chỉnh".equals(row.get(9))).count();
             long completedLate = workRows.stream().filter(row -> "Hoàn thành trễ".equals(row.get(9))).count();
             long extensionCount = work.stream().flatMap(row -> row.getExtensions().stream())
                     .filter(extension -> inRange(extension.getCreatedAt(), rangeStart, asOf))
-                    .filter(extension -> !"ADMIN_CORRECTION".equals(extension.getChangeType())).count();
+                    .filter(extension -> extension.getChangeType() == null || "EXTENSION".equals(extension.getChangeType())).count();
+            long shorteningCount = work.stream().flatMap(row -> row.getExtensions().stream())
+                    .filter(extension -> inRange(extension.getCreatedAt(), rangeStart, asOf))
+                    .filter(extension -> "SHORTENING".equals(extension.getChangeType())).count();
+            long resetCount = work.stream().flatMap(row -> row.getExtensions().stream())
+                    .filter(extension -> inRange(extension.getCreatedAt(), rangeStart, asOf))
+                    .filter(extension -> "RESET".equals(extension.getChangeType())).count();
             long adjustmentCount = work.stream().flatMap(row -> row.getExtensions().stream())
                     .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType())).count();
             writeSheet(workbook, "Tổng quan", "BÁO CÁO QUẢN TRỊ · " + label,
@@ -123,9 +130,12 @@ public class ReportExcelService {
                             List.of(futurePeriod ? "Kết quả thực hiện" : "Đầu việc hoàn thành tại ngày chốt", futurePeriod ? "Chưa đến kỳ" : completedWork),
                             List.of("Đúng hạn theo hạn ban đầu", futurePeriod ? "Chưa đến kỳ" : onTimeOriginal),
                             List.of("Đúng hạn sau gia hạn", futurePeriod ? "Chưa đến kỳ" : onTimeExtended),
+                            List.of("Đúng hạn theo hạn rút ngắn", futurePeriod ? "Chưa đến kỳ" : onTimeShortened),
                             List.of("Đúng hạn sau điều chỉnh bởi ADMIN", futurePeriod ? "Chưa đến kỳ" : onTimeAdjusted),
                             List.of("Hoàn thành trễ", futurePeriod ? "Chưa đến kỳ" : completedLate),
                             List.of("Số lần gia hạn trong kỳ", futurePeriod ? "Chưa đến kỳ" : extensionCount),
+                            List.of("Số lần rút ngắn hạn trong kỳ", futurePeriod ? "Chưa đến kỳ" : shorteningCount),
+                            List.of("Số lần khôi phục hạn ban đầu trong kỳ", futurePeriod ? "Chưa đến kỳ" : resetCount),
                             List.of("Số lần điều chỉnh hạn ADMIN (kể cả hậu kỳ)", futurePeriod ? "Chưa đến kỳ" : adjustmentCount),
                             List.of(futurePeriod ? "Chỉ tiêu dự kiến" : "KPI được ghi nhận", kpis.size()),
                             List.of(futurePeriod ? "Mục tiêu dự kiến" : "Mục tiêu trong kỳ", goals.size()),
@@ -145,7 +155,7 @@ public class ReportExcelService {
                 writeSheet(workbook, "Cập nhật", "LỊCH SỬ CẬP NHẬT · " + label, List.of("Thời điểm", "Nhóm", "Công việc", "Phụ trách", "Tiến độ", "Trạng thái", "Ghi chú", "Người cập nhật"), progressHistory, titleStyle, headerStyle, bodyStyle);
                 List<? extends List<?>> extensions = work.stream().flatMap(row -> row.getExtensions().stream()
                         .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()) || inRange(extension.getCreatedAt(), startDate, asOf))
-                        .map(extension -> List.of(extension.getCreatedAt().toString(), "ADMIN_CORRECTION".equals(extension.getChangeType()) ? "Điều chỉnh bởi ADMIN" : "Gia hạn", row.getGroup(), row.getTitle(), extension.getPreviousDueDate().toString(), extension.getNewDueDate().toString(), extension.getReason(), extension.getExtendedBy())))
+                        .map(extension -> List.of(extension.getCreatedAt().toString(), "ADMIN_CORRECTION".equals(extension.getChangeType()) ? "Điều chỉnh bởi ADMIN" : "SHORTENING".equals(extension.getChangeType()) ? "Rút ngắn hạn" : "RESET".equals(extension.getChangeType()) ? "Khôi phục hạn ban đầu" : "Gia hạn", row.getGroup(), row.getTitle(), extension.getPreviousDueDate().toString(), extension.getNewDueDate().toString(), extension.getReason(), extension.getExtendedBy())))
                         .map(row -> (List<?>) row).toList();
                 writeSheet(workbook, "Thay đổi hạn", "LỊCH SỬ THAY ĐỔI HẠN · " + label, List.of("Thời điểm", "Loại thay đổi", "Nhóm", "Công việc", "Hạn cũ", "Hạn mới", "Lý do", "Người thực hiện"), extensions, titleStyle, headerStyle, bodyStyle);
             }
@@ -281,9 +291,12 @@ public class ReportExcelService {
         }
         String deadlineResult;
         if (completedByCutoff) {
-            if (work.getOriginalDueDate() != null && !completedDate.isAfter(work.getOriginalDueDate())) deadlineResult = "Đúng hạn ban đầu";
-            else if (dueDate != null && !completedDate.isAfter(dueDate)) deadlineResult = latestExtension != null && "ADMIN_CORRECTION".equals(latestExtension.getChangeType()) ? "Đúng hạn sau điều chỉnh" : "Đúng hạn sau gia hạn";
-            else deadlineResult = "Hoàn thành trễ";
+            String changeType = latestExtension == null ? null : latestExtension.getChangeType();
+            if (dueDate != null && completedDate.isAfter(dueDate)) deadlineResult = "Hoàn thành trễ";
+            else if ("ADMIN_CORRECTION".equals(changeType) && work.getOriginalDueDate() != null && completedDate.isAfter(work.getOriginalDueDate())) deadlineResult = "Đúng hạn sau điều chỉnh";
+            else if ("SHORTENING".equals(changeType)) deadlineResult = "Đúng hạn theo hạn rút ngắn";
+            else if (("EXTENSION".equals(changeType) || changeType == null) && latestExtension != null && work.getOriginalDueDate() != null && completedDate.isAfter(work.getOriginalDueDate())) deadlineResult = "Đúng hạn sau gia hạn";
+            else deadlineResult = "Đúng hạn ban đầu";
         } else {
             deadlineResult = dueDate != null && dueDate.isBefore(asOfDate) ? "Quá hạn" : "Trong hạn";
         }
