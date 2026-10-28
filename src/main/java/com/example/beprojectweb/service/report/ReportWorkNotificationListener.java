@@ -93,9 +93,13 @@ public class ReportWorkNotificationListener {
                 + "<p><b>Nội dung cập nhật:</b><br>" + escape(event.note()) + "</p>";
         String html = emailTemplate(lead, work, extra);
         Set<String> sentTo = new HashSet<>();
-        for (User manager : userRepository.findAllEnabledWithAnyRoleAndEmail(MANAGER_ROLES)) {
+        List<User> managers = userRepository.findAllEnabledWithAnyRoleAndEmail(MANAGER_ROLES);
+        for (User manager : managers) {
             if (event.actor() != null && event.actor().equals(manager.getUsername())) continue;
             sendOnce(manager, subject, html, sentTo);
+        }
+        if (sentTo.isEmpty()) {
+            log.warn("No active ADMIN/REPORT_WORK email recipient found for workId={}", work.getId());
         }
     }
 
@@ -105,9 +109,17 @@ public class ReportWorkNotificationListener {
 
     private void notifyAssignedMember(ReportWork work, String subjectPrefix, String lead,
                                       ReportWorkNotificationEvent event, String extra) {
-        userRepository.findByReportStaff_IdAndEnabledTrue(work.getOwner().getId())
-                .filter(this::isReportMember)
-                .ifPresent(user -> send(user, subjectPrefix + ": " + work.getTitle(), emailTemplate(lead, work, extra)));
+        var assignedUser = userRepository.findByReportStaff_IdAndEnabledTrue(work.getOwner().getId());
+        if (assignedUser.isEmpty()) {
+            log.warn("No active account is linked to assigned reportStaffId={} for workId={}", work.getOwner().getId(), work.getId());
+            return;
+        }
+        User user = assignedUser.get();
+        if (!isReportMember(user)) {
+            log.warn("Linked account is not REPORT_MEMBER for reportStaffId={} and workId={}", work.getOwner().getId(), work.getId());
+            return;
+        }
+        send(user, subjectPrefix + ": " + work.getTitle(), emailTemplate(lead, work, extra));
     }
 
     private boolean isReportMember(User user) {
