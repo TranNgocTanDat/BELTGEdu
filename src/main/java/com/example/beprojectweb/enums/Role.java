@@ -4,5 +4,6 @@ public enum Role {
     ADMIN,
     USER,
     REPORT_WORK,
-    ADMIN_SCHOOL
+    ADMIN_SCHOOL,
+    REPORT_MEMBER
 }

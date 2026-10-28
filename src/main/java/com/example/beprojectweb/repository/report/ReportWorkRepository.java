@@ -10,6 +10,10 @@ import java.util.UUID;
 public interface ReportWorkRepository extends JpaRepository<ReportWork, UUID> {
     @EntityGraph(attributePaths = {"owner", "workGroup"})
     List<ReportWork> findAllByOrderByPeriodDescTitleAsc();
+    @EntityGraph(attributePaths = {"owner", "workGroup"})
+    List<ReportWork> findAllByOwner_IdOrderByCurrentDueDateAscTitleAsc(UUID ownerId);
+    @EntityGraph(attributePaths = {"owner", "workGroup"})
+    java.util.Optional<ReportWork> findByIdAndOwner_Id(UUID id, UUID ownerId);
     boolean existsByOwner_Id(UUID ownerId);
     boolean existsByWorkGroup_Id(UUID groupId);
 }

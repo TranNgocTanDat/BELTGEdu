@@ -24,4 +24,5 @@ public class AdminUserUpdateRequest {
     @NotNull
     private Role role;
     private UUID regionId;
+    private UUID reportStaffId;
 }

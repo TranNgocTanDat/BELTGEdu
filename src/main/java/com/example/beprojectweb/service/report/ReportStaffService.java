@@ -5,6 +5,7 @@ import com.example.beprojectweb.dto.response.report.ReportStaffResponse;
 import com.example.beprojectweb.entity.report.ReportStaff;
 import com.example.beprojectweb.repository.report.ReportStaffRepository;
 import com.example.beprojectweb.repository.report.ReportWorkRepository;
+import com.example.beprojectweb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,6 +22,7 @@ import java.util.UUID;
 public class ReportStaffService {
     private final ReportStaffRepository repository;
     private final ReportWorkRepository workRepository;
+    private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
     public List<ReportStaffResponse> getAll() {
@@ -46,6 +48,9 @@ public class ReportStaffService {
     public void delete(UUID id) {
         ReportStaff staff = repository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report staff not found"));
+        if (userRepository.existsByReportStaff_Id(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Unlink the login account before deleting this staff profile");
+        }
         if (workRepository.existsByOwner_Id(id)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Reassign work items before deleting this staff member");
         }

@@ -66,7 +66,7 @@ public class SecurityConfig {
 
                         // User access is additionally scoped by region in UserService.
                         .requestMatchers(HttpMethod.GET, "/users/myInfo")
-                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.REPORT_WORK.name(), Role.ADMIN_SCHOOL.name())
+                        .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.REPORT_WORK.name(), Role.ADMIN_SCHOOL.name(), Role.REPORT_MEMBER.name())
                         .requestMatchers(HttpMethod.PUT, "/users/me/update")
                         .hasAnyRole(Role.USER.name(), Role.ADMIN.name())
                         .requestMatchers(HttpMethod.GET, "/users", "/users/**")
@@ -100,6 +100,8 @@ public class SecurityConfig {
                         .hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
                         .requestMatchers("/regions/**").hasAnyRole(Role.ADMIN.name(), Role.ADMIN_SCHOOL.name())
 
+                        .requestMatchers("/report-work/my-work", "/report-work/my-work/**")
+                        .hasRole(Role.REPORT_MEMBER.name())
                         .requestMatchers("/report-work/**")
                         .hasAnyRole(Role.ADMIN.name(), Role.REPORT_WORK.name())
 
@@ -114,6 +116,7 @@ public class SecurityConfig {
                         ).hasAnyRole("USER", "ADMIN")
 
                         // All remaining requests need auth
+                        .requestMatchers("/**").hasAnyRole(Role.USER.name(), Role.ADMIN.name(), Role.REPORT_WORK.name(), Role.ADMIN_SCHOOL.name())
                         .anyRequest().authenticated()
         );
 

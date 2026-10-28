@@ -6,6 +6,7 @@ import com.example.beprojectweb.dto.request.UserUpdateRequest;
 import com.example.beprojectweb.dto.response.UserResponse;
 import com.example.beprojectweb.entity.Region;
 import com.example.beprojectweb.entity.User;
+import com.example.beprojectweb.entity.report.ReportStaff;
 import com.example.beprojectweb.enums.Role;
 import com.example.beprojectweb.exception.AppException;
 import com.example.beprojectweb.exception.ErrorCode;
@@ -13,6 +14,7 @@ import com.example.beprojectweb.mapper.UserMapper;
 import com.example.beprojectweb.repository.RegionRepository;
 import com.example.beprojectweb.repository.UserRepository;
 import com.example.beprojectweb.repository.RefreshTokenRepository;
+import com.example.beprojectweb.repository.report.ReportStaffRepository;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -36,6 +38,7 @@ public class UserService {
     RefreshTokenRepository refreshTokenRepository;
     RegionRepository regionRepository;
     UserMapper userMapper;
+    ReportStaffRepository reportStaffRepository;
 
     @Transactional(readOnly = true)
     public List<UserResponse> getUsers() {
@@ -48,7 +51,7 @@ public class UserService {
         } else {
             users = List.of();
         }
-        return users.stream().map(userMapper::toUserResponse).toList();
+        return users.stream().map(this::toUserResponse).toList();
     }
 
     @Transactional(readOnly = true)
@@ -57,13 +60,13 @@ public class UserService {
         User requested = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTS));
         assertSameRegionOrAdmin(current, requested);
-        return userMapper.toUserResponse(requested);
+        return toUserResponse(requested);
     }
 
-    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'REPORT_WORK', 'ADMIN_SCHOOL')")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'REPORT_WORK', 'ADMIN_SCHOOL', 'REPORT_MEMBER')")
     @Transactional(readOnly = true)
     public UserResponse getMyInfo() {
-        return userMapper.toUserResponse(currentUser());
+        return toUserResponse(currentUser());
     }
 
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
@@ -71,7 +74,7 @@ public class UserService {
     public UserResponse updateUser(UserUpdateRequest request) {
         User user = currentUser();
         userMapper.updateUser(user, request);
-        return userMapper.toUserResponse(userRepository.save(user));
+        return toUserResponse(userRepository.save(user));
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -89,7 +92,8 @@ public class UserService {
         }
         user.setRoles(new HashSet<>(List.of(request.getRole().name())));
         user.setRegion(region);
-        return userMapper.toUserResponse(userRepository.save(user));
+        applyReportStaffLink(user, request.getRole(), request.getReportStaffId());
+        return toUserResponse(userRepository.save(user));
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -120,7 +124,8 @@ public class UserService {
         user.setDob(request.getDob());
         user.setRoles(new HashSet<>(List.of(request.getRole().name())));
         user.setRegion(region);
-        return userMapper.toUserResponse(userRepository.save(user));
+        applyReportStaffLink(user, request.getRole(), request.getReportStaffId());
+        return toUserResponse(userRepository.save(user));
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -131,7 +136,7 @@ public class UserService {
         user.setEnabled(true);
         user.setVerificationCode(null);
         user.setVerificationCodeExpiredAt(null);
-        return userMapper.toUserResponse(userRepository.save(user));
+        return toUserResponse(userRepository.save(user));
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -146,6 +151,30 @@ public class UserService {
         userRepository.delete(user);
     }
 
+    private void applyReportStaffLink(User user, Role role, UUID reportStaffId) {
+        if (role != Role.REPORT_MEMBER) {
+            user.setReportStaff(null);
+            return;
+        }
+        if (reportStaffId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "REPORT_MEMBER accounts must be linked to a report staff profile");
+        }
+        ReportStaff staff = reportStaffRepository.findById(reportStaffId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report staff profile not found"));
+        if (userRepository.existsByReportStaff_IdAndIdNot(reportStaffId, user.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This report staff profile is already linked to another account");
+        }
+        user.setReportStaff(staff);
+    }
+
+    private UserResponse toUserResponse(User user) {
+        UserResponse response = userMapper.toUserResponse(user);
+        if (user.getReportStaff() != null) {
+            response.setReportStaffId(user.getReportStaff().getId());
+            response.setReportStaffName(user.getReportStaff().getName());
+        }
+        return response;
+    }
     private User currentUser() {
         String username = SecurityContextHolder.getContext().getAuthentication().getName();
         return userRepository.findByUsername(username)

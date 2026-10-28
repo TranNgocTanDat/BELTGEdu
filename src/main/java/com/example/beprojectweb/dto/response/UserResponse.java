@@ -22,6 +22,8 @@ public class UserResponse {
     Set<String> roles;
     UUID regionId;
     String regionName;
+    UUID reportStaffId;
+    String reportStaffName;
     boolean enabled;
 
 }

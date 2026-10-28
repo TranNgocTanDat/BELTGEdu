@@ -2,6 +2,7 @@ package com.example.beprojectweb.repository;
 
 import com.example.beprojectweb.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 
 import java.util.Optional;
 import java.util.List;
@@ -15,7 +16,13 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByUsername(String username);
     Optional<User> findByEmail(String email);
     Optional<User> findByVerificationCode(String verificationCode);
+    @EntityGraph(attributePaths = {"region", "reportStaff"})
     List<User> findAllByRegion_Id(UUID regionId);
+    @Override
+    @EntityGraph(attributePaths = {"region", "reportStaff"})
+    List<User> findAll();
     boolean existsByRegion_Id(UUID regionId);
+    boolean existsByReportStaff_Id(UUID reportStaffId);
+    boolean existsByReportStaff_IdAndIdNot(UUID reportStaffId, UUID userId);
 
 }

@@ -11,6 +11,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import com.example.beprojectweb.entity.report.ReportStaff;
 
 @Entity
 @Getter
@@ -39,6 +40,10 @@ public class User{
 
     @ElementCollection(fetch = FetchType.EAGER)
     Set<String> roles;
+
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "report_staff_id", unique = true)
+    ReportStaff reportStaff;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "region_id")
