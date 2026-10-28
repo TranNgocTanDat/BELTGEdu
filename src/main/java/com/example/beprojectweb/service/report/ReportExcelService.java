@@ -82,6 +82,7 @@ public class ReportExcelService {
         }
         LocalDate asOf = expectedCutoff;
         boolean futurePeriod = rangeStart.isAfter(today);
+        boolean closedPeriod = !futurePeriod && rangeEnd.isBefore(today);
 
         List<ReportStaff> staff = staffRepository.findAllByOrderByNameAsc();
         List<ReportWork> allWork = workRepository.findAllByOrderByPeriodDescTitleAsc();
@@ -103,8 +104,10 @@ public class ReportExcelService {
             CellStyle headerStyle = headerStyle(workbook);
             CellStyle bodyStyle = bodyStyle(workbook);
             String label = dateRange ? dateRangeLabel(startDate, endDate) : periodLabel(reportPeriod);
-            List<? extends List<?>> workRows = work.stream().map(row -> workExportRow(row, asOf, futurePeriod)).toList();
+            List<? extends List<?>> workRows = work.stream().map(row -> workExportRow(row, asOf, futurePeriod, closedPeriod)).toList();
             long completedWork = workRows.stream().filter(row -> "Hoàn thành".equals(row.get(8))).count();
+            long openWork = workRows.stream().filter(row -> !"Hoàn thành".equals(row.get(8))).count();
+            long overdueWork = workRows.stream().filter(row -> "Trễ hạn".equals(row.get(8))).count();
             long onTimeOriginal = workRows.stream().filter(row -> "Đúng hạn ban đầu".equals(row.get(9))).count();
             long onTimeExtended = workRows.stream().filter(row -> "Đúng hạn sau gia hạn".equals(row.get(9))).count();
             long onTimeShortened = workRows.stream().filter(row -> "Đúng hạn theo hạn rút ngắn".equals(row.get(9))).count();
@@ -128,6 +131,8 @@ public class ReportExcelService {
                             List.of(futurePeriod ? "Công việc dự kiến" : "Đầu việc trong kỳ", work.size()),
                             List.of(futurePeriod ? "Mốc lập kế hoạch" : "Mốc chốt dữ liệu", asOf.toString()),
                             List.of(futurePeriod ? "Kết quả thực hiện" : "Đầu việc hoàn thành tại ngày chốt", futurePeriod ? "Chưa đến kỳ" : completedWork),
+                            List.of("Công việc còn mở tại ngày chốt", futurePeriod ? "Chưa đến kỳ" : openWork),
+                            List.of("Công việc trễ hạn tại ngày chốt", futurePeriod ? "Chưa đến kỳ" : overdueWork),
                             List.of("Đúng hạn theo hạn ban đầu", futurePeriod ? "Chưa đến kỳ" : onTimeOriginal),
                             List.of("Đúng hạn sau gia hạn", futurePeriod ? "Chưa đến kỳ" : onTimeExtended),
                             List.of("Đúng hạn theo hạn rút ngắn", futurePeriod ? "Chưa đến kỳ" : onTimeShortened),
@@ -248,7 +253,7 @@ public class ReportExcelService {
         return true;
     }
 
-    private List<?> workExportRow(ReportWork work, LocalDate asOfDate, boolean planOnly) {
+    private List<?> workExportRow(ReportWork work, LocalDate asOfDate, boolean planOnly, boolean closedPeriod) {
         LocalDate dueDate = work.getOriginalDueDate();
         ReportWorkExtension latestExtension = work.getExtensions().stream()
                 .filter(extension -> "ADMIN_CORRECTION".equals(extension.getChangeType()) || !extension.getCreatedAt().toLocalDate().isAfter(asOfDate))
@@ -287,7 +292,7 @@ public class ReportExcelService {
                 status = "Đang thực hiện";
                 progress = Math.min(progress, 99);
             }
-            if (dueDate != null && dueDate.isBefore(asOfDate)) status = "Trễ hạn";
+            if (isOverdueAtCutoff(dueDate, asOfDate, closedPeriod)) status = "Trễ hạn";
         }
         String deadlineResult;
         if (completedByCutoff) {
@@ -298,11 +303,15 @@ public class ReportExcelService {
             else if (("EXTENSION".equals(changeType) || changeType == null) && latestExtension != null && work.getOriginalDueDate() != null && completedDate.isAfter(work.getOriginalDueDate())) deadlineResult = "Đúng hạn sau gia hạn";
             else deadlineResult = "Đúng hạn ban đầu";
         } else {
-            deadlineResult = dueDate != null && dueDate.isBefore(asOfDate) ? "Quá hạn" : "Trong hạn";
+            deadlineResult = isOverdueAtCutoff(dueDate, asOfDate, closedPeriod) ? "Quá hạn" : "Trong hạn";
         }
         return java.util.Arrays.asList(work.getWorkGroup() == null ? work.getGroup() : work.getWorkGroup().getName(), work.getTitle(), work.getOwner().getName(),
                 dateText(work.getStartDate()), dateText(work.getOriginalDueDate()), dateText(dueDate), dateText(completedDate),
                 progress + "%", status, deadlineResult, work.getImpact());
+    }
+
+    private boolean isOverdueAtCutoff(LocalDate dueDate, LocalDate cutoffDate, boolean closedPeriod) {
+        return dueDate != null && (closedPeriod ? !dueDate.isAfter(cutoffDate) : dueDate.isBefore(cutoffDate));
     }
 
     private boolean inRange(LocalDateTime dateTime, LocalDate start, LocalDate end) {
