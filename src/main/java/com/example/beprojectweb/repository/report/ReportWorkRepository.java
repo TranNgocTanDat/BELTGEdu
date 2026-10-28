@@ -13,6 +13,8 @@ public interface ReportWorkRepository extends JpaRepository<ReportWork, UUID> {
     @EntityGraph(attributePaths = {"owner", "workGroup"})
     List<ReportWork> findAllByStatusOrderByCurrentDueDateAscTitleAsc(String status);
     @EntityGraph(attributePaths = {"owner", "workGroup"})
+    java.util.Optional<ReportWork> findNotificationWorkById(UUID id);
+    @EntityGraph(attributePaths = {"owner", "workGroup"})
     List<ReportWork> findAllByOwner_IdOrderByCurrentDueDateAscTitleAsc(UUID ownerId);
     @EntityGraph(attributePaths = {"owner", "workGroup"})
     java.util.Optional<ReportWork> findByIdAndOwner_Id(UUID id, UUID ownerId);

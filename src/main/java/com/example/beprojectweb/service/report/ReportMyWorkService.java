@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -32,6 +33,7 @@ public class ReportMyWorkService {
     private final UserRepository userRepository;
     private final ReportWorkRepository workRepository;
     private final ReportWorkUpdateRepository updateRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public List<ReportWorkResponse> getMyWork() {
@@ -78,7 +80,10 @@ public class ReportMyWorkService {
         work.getUpdates().add(update);
         updateRepository.save(update);
 
-        return toResponse(workRepository.save(work));
+        work = workRepository.save(work);
+        eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.MEMBER_UPDATED,
+                work.getId(), null, null, null, null, user.getUsername(), work.getProgress(), work.getStatus(), impact));
+        return toResponse(work);
     }
 
     private UUID requireStaffId(User user) {

@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -36,6 +37,7 @@ public class ReportWorkService {
     private final ReportWorkGroupRepository groupRepository;
     private final ReportWorkUpdateRepository updateRepository;
     private final ReportWorkExtensionRepository extensionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(readOnly = true)
     public List<ReportWorkResponse> getAll() {
@@ -55,6 +57,9 @@ public class ReportWorkService {
         work.setCreatedAt(LocalDateTime.now(java.time.ZoneId.of("Asia/Ho_Chi_Minh")));
         work = workRepository.save(work);
         recordUpdate(work, request.getImpact());
+        eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.CREATED,
+                work.getId(), null, null, null, null, SecurityContextHolder.getContext().getAuthentication().getName(),
+                work.getProgress(), work.getStatus(), work.getImpact()));
         return toResponse(work);
     }
 
@@ -62,12 +67,30 @@ public class ReportWorkService {
     public ReportWorkResponse update(UUID id, ReportWorkRequest request) {
         ReportWork work = workRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report work item not found"));
+        UUID previousOwnerId = work.getOwner().getId();
         boolean changed = !java.util.Objects.equals(work.getProgress(), request.getProgress())
                 || !java.util.Objects.equals(work.getStatus(), request.getStatus())
                 || !java.util.Objects.equals(work.getImpact(), request.getImpact());
+        UUID previousGroupId = work.getWorkGroup() == null ? null : work.getWorkGroup().getId();
+        boolean groupChanged = request.getGroupId() != null
+                ? !java.util.Objects.equals(previousGroupId, request.getGroupId())
+                : request.getGroup() != null && !java.util.Objects.equals(work.getGroup(), request.getGroup().trim());
+        boolean notificationChanged = changed
+                || !java.util.Objects.equals(previousOwnerId, request.getOwnerId())
+                || groupChanged
+                || !java.util.Objects.equals(work.getTitle(), request.getTitle().trim())
+                || (request.getDescription() != null && !java.util.Objects.equals(work.getDescription(), request.getDescription().trim()))
+                || (request.getExpectedOutput() != null && !java.util.Objects.equals(work.getExpectedOutput(), request.getExpectedOutput().trim()))
+                || !java.util.Objects.equals(work.getStartDate(), request.getStartDate());
         apply(work, request);
         if (changed) recordUpdate(work, request.getImpact());
-        return toResponse(workRepository.save(work));
+        work = workRepository.save(work);
+        if (notificationChanged) {
+            eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.UPDATED,
+                    work.getId(), previousOwnerId, null, null, null,
+                    SecurityContextHolder.getContext().getAuthentication().getName(), work.getProgress(), work.getStatus(), work.getImpact()));
+        }
+        return toResponse(work);
     }
 
     @Transactional
@@ -92,7 +115,11 @@ public class ReportWorkService {
         extensionRepository.save(extension);
         work.setCurrentDueDate(request.getNewDueDate());
         work.setStatus("Đang thực hiện");
-        return toResponse(workRepository.save(work));
+        work = workRepository.save(work);
+        eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.DEADLINE_CHANGED,
+                work.getId(), null, previous, request.getNewDueDate(), "EXTENSION",
+                SecurityContextHolder.getContext().getAuthentication().getName(), work.getProgress(), work.getStatus(), request.getReason()));
+        return toResponse(work);
     }
 
     @Transactional
@@ -123,7 +150,11 @@ public class ReportWorkService {
         work.getExtensions().add(change);
         extensionRepository.save(change);
         work.setCurrentDueDate(request.getNewDueDate());
-        return toResponse(workRepository.save(work));
+        work = workRepository.save(work);
+        eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.DEADLINE_CHANGED,
+                work.getId(), null, change.getPreviousDueDate(), change.getNewDueDate(), changeType,
+                username, work.getProgress(), work.getStatus(), change.getReason()));
+        return toResponse(work);
     }
 
     @Transactional
@@ -154,7 +185,11 @@ public class ReportWorkService {
         work.getExtensions().add(adjustment);
         extensionRepository.save(adjustment);
         work.setCurrentDueDate(request.getNewDueDate());
-        return toResponse(workRepository.save(work));
+        work = workRepository.save(work);
+        eventPublisher.publishEvent(new ReportWorkNotificationEvent(ReportWorkNotificationEvent.Type.DEADLINE_CHANGED,
+                work.getId(), null, adjustment.getPreviousDueDate(), adjustment.getNewDueDate(), "ADMIN_CORRECTION",
+                username, work.getProgress(), work.getStatus(), adjustment.getReason()));
+        return toResponse(work);
     }
 
     @Transactional
