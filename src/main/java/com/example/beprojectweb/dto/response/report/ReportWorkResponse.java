@@ -17,6 +17,8 @@ public class ReportWorkResponse {
     private String period;
     private String group;
     private String title;
+    private String description;
+    private String expectedOutput;
     private UUID ownerId;
     private Integer progress;
     private String status;

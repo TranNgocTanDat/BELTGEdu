@@ -24,6 +24,12 @@ public class ReportWorkRequest {
     @NotBlank @Size(max = 500)
     private String title;
 
+    @Size(max = 2000)
+    private String description;
+
+    @Size(max = 1500)
+    private String expectedOutput;
+
     @NotNull
     private UUID ownerId;
 

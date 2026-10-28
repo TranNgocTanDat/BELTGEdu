@@ -42,6 +42,12 @@ public class ReportWorkService {
         return workRepository.findAllByOrderByPeriodDescTitleAsc().stream().map(this::toResponse).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<ReportWorkResponse> getSupportRequests() {
+        return workRepository.findAllByStatusOrderByCurrentDueDateAscTitleAsc("Cần hỗ trợ")
+                .stream().map(this::toResponse).toList();
+    }
+
     @Transactional
     public ReportWorkResponse create(ReportWorkRequest request) {
         ReportWork work = new ReportWork();
@@ -190,6 +196,10 @@ public class ReportWorkService {
         work.setWorkGroup(group);
         work.setGroup(group == null ? request.getGroup().trim() : group.getName());
         work.setTitle(request.getTitle().trim());
+        if (request.getDescription() != null) work.setDescription(request.getDescription().trim());
+        else if (work.getDescription() == null) work.setDescription("");
+        if (request.getExpectedOutput() != null) work.setExpectedOutput(request.getExpectedOutput().trim());
+        else if (work.getExpectedOutput() == null) work.setExpectedOutput("");
         work.setOwner(owner);
         work.setProgress(request.getProgress());
         work.setStatus(request.getStatus().trim());
@@ -212,7 +222,7 @@ public class ReportWorkService {
         List<ReportWorkResponse.Extension> extensions = work.getExtensions().stream().sorted(java.util.Comparator.comparing(ReportWorkExtension::getCreatedAt))
                 .map(item -> new ReportWorkResponse.Extension(item.getId(), item.getCreatedAt(), item.getPreviousDueDate(), item.getNewDueDate(), item.getReason(), item.getExtendedBy(), item.getChangeType() == null ? "EXTENSION" : item.getChangeType())).toList();
         // Return the persisted work state. Period-specific and current overdue status is calculated by report snapshots.
-        return new ReportWorkResponse(work.getId(), work.getPeriod(), work.getWorkGroup() == null ? work.getGroup() : work.getWorkGroup().getName(), work.getTitle(), work.getOwner().getId(), work.getProgress(), work.getStatus(), work.getImpact(), work.getWorkGroup() == null ? null : work.getWorkGroup().getId(), work.getStartDate(), work.getOriginalDueDate(), work.getCurrentDueDate(), work.getCompletedDate(), work.getCreatedAt(), deadlineResult(work), updates, extensions);
+        return new ReportWorkResponse(work.getId(), work.getPeriod(), work.getWorkGroup() == null ? work.getGroup() : work.getWorkGroup().getName(), work.getTitle(), work.getDescription() == null ? "" : work.getDescription(), work.getExpectedOutput() == null ? "" : work.getExpectedOutput(), work.getOwner().getId(), work.getProgress(), work.getStatus(), work.getImpact(), work.getWorkGroup() == null ? null : work.getWorkGroup().getId(), work.getStartDate(), work.getOriginalDueDate(), work.getCurrentDueDate(), work.getCompletedDate(), work.getCreatedAt(), deadlineResult(work), updates, extensions);
     }
 
     private String deadlineResult(ReportWork work) {

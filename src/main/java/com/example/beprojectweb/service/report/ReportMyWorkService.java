@@ -53,8 +53,8 @@ public class ReportMyWorkService {
         }
         String status = request.getStatus().trim();
         String impact = request.getImpact() == null ? "" : request.getImpact().trim();
-        if ("Hoàn thành".equals(status) && impact.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Vui lòng ghi kết quả trước khi báo hoàn thành.");
+        if (("Hoàn thành".equals(status) || "Cần hỗ trợ".equals(status)) && impact.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Vui lòng ghi kết quả hoặc nêu rõ nội dung cần hỗ trợ.");
         }
         if ("Chưa bắt đầu".equals(status) && request.getProgress() != 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Công việc chưa bắt đầu phải có tiến độ 0%.");
@@ -107,7 +107,7 @@ public class ReportMyWorkService {
                 ? work.getCurrentDueDate() != null && work.getCompletedDate().isAfter(work.getCurrentDueDate()) ? "Hoàn thành trễ" : "Hoàn thành"
                 : work.getCurrentDueDate() != null && LocalDate.now(ZONE).isAfter(work.getCurrentDueDate()) ? "Quá hạn" : "Trong hạn";
         return new ReportWorkResponse(work.getId(), work.getPeriod(), work.getWorkGroup() == null ? work.getGroup() : work.getWorkGroup().getName(),
-                work.getTitle(), work.getOwner().getId(), work.getProgress(), work.getStatus(), work.getImpact(),
+                work.getTitle(), work.getDescription() == null ? "" : work.getDescription(), work.getExpectedOutput() == null ? "" : work.getExpectedOutput(), work.getOwner().getId(), work.getProgress(), work.getStatus(), work.getImpact(),
                 work.getWorkGroup() == null ? null : work.getWorkGroup().getId(), work.getStartDate(), work.getOriginalDueDate(),
                 work.getCurrentDueDate(), work.getCompletedDate(), work.getCreatedAt(), deadlineResult, updates, extensions);
     }

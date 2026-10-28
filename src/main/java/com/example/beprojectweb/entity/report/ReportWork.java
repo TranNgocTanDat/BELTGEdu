@@ -48,6 +48,12 @@ public class ReportWork {
     @Column(nullable = false, length = 500)
     String title;
 
+    @Column(length = 2000)
+    String description = "";
+
+    @Column(name = "expected_output", length = 1500)
+    String expectedOutput = "";
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_id", nullable = false)
     ReportStaff owner;

@@ -31,6 +31,11 @@ public class ReportWorkController {
         return APIResponse.<List<ReportWorkResponse>>builder().result(service.getAll()).build();
     }
 
+    @GetMapping("/support-requests")
+    public APIResponse<List<ReportWorkResponse>> getSupportRequests() {
+        return APIResponse.<List<ReportWorkResponse>>builder().result(service.getSupportRequests()).build();
+    }
+
     @PostMapping
     public APIResponse<ReportWorkResponse> create(@Valid @RequestBody ReportWorkRequest request) {
         return APIResponse.<ReportWorkResponse>builder().result(service.create(request)).build();
