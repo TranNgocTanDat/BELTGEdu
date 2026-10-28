@@ -28,7 +28,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     boolean existsByReportStaff_Id(UUID reportStaffId);
     boolean existsByReportStaff_IdAndIdNot(UUID reportStaffId, UUID userId);
 
-    @EntityGraph(attributePaths = {"reportStaff"})
+    @EntityGraph(attributePaths = {"reportStaff", "roles"})
     java.util.Optional<User> findByReportStaff_IdAndEnabledTrue(UUID reportStaffId);
 
     @Query("select distinct u from User u join u.roles userRole where u.enabled = true and u.email is not null and u.email <> '' and userRole in :roles")
