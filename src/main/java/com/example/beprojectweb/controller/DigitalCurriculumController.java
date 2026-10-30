@@ -3,6 +3,7 @@ package com.example.beprojectweb.controller;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.DigitalLessonCreateRequest;
+import com.example.beprojectweb.dto.request.DigitalLessonBulkReplaceRequest;
 import com.example.beprojectweb.dto.request.DigitalLessonUpdateRequest;
 import com.example.beprojectweb.dto.response.DigitalLessonResponse;
 import com.example.beprojectweb.enums.DigitalProgram;
@@ -40,6 +41,13 @@ public class DigitalCurriculumController {
     @PostMapping("/lessons")
     public APIResponse<DigitalLessonResponse> createLesson(@RequestBody @jakarta.validation.Valid DigitalLessonCreateRequest request) {
         return APIResponse.<DigitalLessonResponse>builder().result(curriculumService.createLesson(request)).build();
+    }
+
+    @PutMapping("/lessons/bulk-replace")
+    public APIResponse<List<DigitalLessonResponse>> replaceLessons(
+            @RequestBody @jakarta.validation.Valid DigitalLessonBulkReplaceRequest request) {
+        return APIResponse.<List<DigitalLessonResponse>>builder()
+                .result(curriculumService.replaceLessons(request)).build();
     }
 
     @PutMapping("/lessons/{id}")

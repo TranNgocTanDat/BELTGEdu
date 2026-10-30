@@ -8,4 +8,5 @@ public interface LessonProgressRepository extends JpaRepository<LessonProgress,U
  void deleteByPlanTypeAndPlanItemIdAndLessonId(String planType,UUID planItemId,String lessonId);
  void deleteAllByPlanTypeAndPlanItemId(String planType,UUID planItemId);
  boolean existsByPlanTypeAndLessonId(String planType,String lessonId);
+ List<LessonProgress> findAllByPlanTypeAndLessonIdIn(String planType,Collection<String> lessonIds);
 }

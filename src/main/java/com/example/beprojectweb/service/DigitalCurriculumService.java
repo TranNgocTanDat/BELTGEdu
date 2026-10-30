@@ -3,6 +3,7 @@ package com.example.beprojectweb.service;
 import com.example.beprojectweb.dto.response.DigitalLessonResponse;
 import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.DigitalLessonCreateRequest;
+import com.example.beprojectweb.dto.request.DigitalLessonBulkReplaceRequest;
 import com.example.beprojectweb.dto.request.DigitalLessonUpdateRequest;
 import com.example.beprojectweb.entity.DigitalLesson;
 import com.example.beprojectweb.enums.DigitalProgram;
@@ -16,6 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -63,6 +67,55 @@ public class DigitalCurriculumService {
                 .title(request.getTitle().trim()).note(normalizeOptional(request.getNote()))
                 .driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build();
         return toResponse(lessonRepository.save(lesson));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
+    @Transactional
+    public List<DigitalLessonResponse> replaceLessons(DigitalLessonBulkReplaceRequest request) {
+        List<DigitalLessonBulkReplaceRequest.LessonItem> requestedLessons = request.getLessons();
+        Set<Integer> requestedOrders = new HashSet<>();
+        for (DigitalLessonBulkReplaceRequest.LessonItem item : requestedLessons) {
+            if (!requestedOrders.add(item.getOrder())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Vị trí bài học " + item.getOrder() + " bị trùng trong danh sách gửi lên.");
+            }
+        }
+
+        List<DigitalLesson> existingLessons = lessonRepository
+                .findAllByProgramAndGradeOrderByLessonOrderAsc(request.getProgram(), request.getGrade());
+        if (!existingLessons.isEmpty()) {
+            List<String> existingIds = existingLessons.stream().map(DigitalLesson::getId).toList();
+            Set<String> progressLessonIds = progressRepository
+                    .findAllByPlanTypeAndLessonIdIn("DIGITAL", existingIds).stream()
+                    .map(progress -> progress.getLessonId())
+                    .collect(Collectors.toSet());
+            if (!progressLessonIds.isEmpty()) {
+                String protectedLessons = existingLessons.stream()
+                        .filter(lesson -> progressLessonIds.contains(lesson.getId()))
+                        .map(lesson -> "Bài " + lesson.getLessonOrder() + " (" + lesson.getTitle() + ")")
+                        .collect(Collectors.joining(", "));
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Không thể thay danh sách vì đã có trường ghi nhận tiến độ: " + protectedLessons + ".");
+            }
+        }
+
+        lessonRepository.deleteAll(existingLessons);
+        lessonRepository.flush();
+
+        List<DigitalLesson> replacements = requestedLessons.stream().map(item -> DigitalLesson.builder()
+                .id(java.util.UUID.randomUUID().toString())
+                .program(request.getProgram())
+                .grade(request.getGrade())
+                .lessonOrder(item.getOrder())
+                .title(item.getTitle().trim())
+                .note(normalizeOptional(item.getNote()))
+                .driveImageUrl(normalizeOptional(item.getDriveImageUrl()))
+                .build()).toList();
+
+        return lessonRepository.saveAll(replacements).stream()
+                .sorted(java.util.Comparator.comparing(DigitalLesson::getLessonOrder))
+                .map(this::toResponse)
+                .toList();
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
