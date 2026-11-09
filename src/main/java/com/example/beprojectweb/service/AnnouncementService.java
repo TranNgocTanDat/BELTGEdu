@@ -23,6 +23,7 @@ import com.example.beprojectweb.repository.RegistrationRepository;
 import com.example.beprojectweb.repository.SchoolRepository;
 import com.example.beprojectweb.repository.StemLessonRepository;
 import com.example.beprojectweb.repository.StemPlanRepository;
+import com.example.beprojectweb.repository.StemPlanVersionRepository;
 import com.example.beprojectweb.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -34,13 +35,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.DayOfWeek;
-import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -50,7 +56,7 @@ public class AnnouncementService {
     private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
     private final StemPlanRepository stemPlanRepository;
-    private final com.example.beprojectweb.repository.StemPlanVersionRepository stemPlanVersionRepository;
+    private final StemPlanVersionRepository stemPlanVersionRepository;
     private final DigitalPlanRepository digitalPlanRepository;
     private final StemLessonRepository stemLessonRepository;
     private final DigitalLessonRepository digitalLessonRepository;
@@ -82,19 +88,14 @@ public class AnnouncementService {
         School school = findSchool(request.getSchoolId());
         assertSchoolAccess(user, school);
         assertMonday(request.getWeekStart());
-        UUID registrationId;
-        try {
-            registrationId = UUID.fromString(request.getRegistrationId().trim());
-        } catch (IllegalArgumentException exception) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "registrationId must be a valid UUID");
-        }
+        UUID registrationId = parseRegistrationId(request.getRegistrationId());
         Registration registration = registrationRepository.findById(registrationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
         if (!registration.getSchool().getId().equals(school.getId())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Registration does not belong to the specified school");
         }
-        String service = request.getService().toLowerCase(java.util.Locale.ROOT);
+        String service = request.getService().toLowerCase(Locale.ROOT);
         if (request.getProgress() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "progress is required to mark an announcement");
         }
@@ -121,30 +122,110 @@ public class AnnouncementService {
         return toResponse(announcementRepository.save(item));
     }
 
+    /**
+     * Bulk mark — fixed issues:
+     *  1. Removed wrong constraint requiring all items to share the same service and weekStart.
+     *     The frontend legitimately sends mixed services and weeks in one bulk call.
+     *  2. User is loaded once instead of once per item.
+     *  3. Schools and registrations are batch-loaded with a single IN query each.
+     */
     @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
     @Transactional
     public List<AnnouncementResponse> markBulk(AnnouncementBulkRequest request) {
         List<AnnouncementRequest> items = request == null ? null : request.getItems();
         if (items == null || items.isEmpty() || items.size() > 100) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "items must contain between 1 and 100 announcements");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "items must contain between 1 and 100 announcements");
         }
-        if (items.stream().anyMatch(java.util.Objects::isNull) || items.get(0).getService() == null || items.get(0).getWeekStart() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Each bulk announcement must be complete");
-        }
-        String service = items.get(0).getService().toLowerCase(Locale.ROOT);
-        LocalDate weekStart = items.get(0).getWeekStart();
+
+        // Validate completeness and collect unique keys + IDs for batch loading
         Set<String> keys = new HashSet<>();
+        Set<UUID> schoolIds = new HashSet<>();
+        Set<UUID> registrationIds = new HashSet<>();
         for (AnnouncementRequest item : items) {
-            if (item.getService() == null || item.getWeekStart() == null
-                    || !service.equals(item.getService().toLowerCase(Locale.ROOT)) || !weekStart.equals(item.getWeekStart())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Bulk announcements must use the same service and actual week");
+            if (item == null || item.getService() == null || item.getWeekStart() == null
+                    || item.getRegistrationId() == null || item.getSchoolId() == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Each bulk announcement must include schoolId, registrationId, service, weekStart and message");
             }
-            String key = item.getRegistrationId() + ":" + service + ":" + weekStart;
+            String service = item.getService().toLowerCase(Locale.ROOT);
+            String key = item.getRegistrationId().trim() + ":" + service + ":" + item.getWeekStart();
             if (!keys.add(key)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Bulk request contains a duplicate school registration");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Bulk request contains a duplicate school registration");
             }
+            schoolIds.add(item.getSchoolId());
+            registrationIds.add(parseRegistrationId(item.getRegistrationId()));
         }
-        return items.stream().map(this::mark).toList();
+
+        // Load user once for the entire bulk operation
+        User user = currentUser();
+
+        // Batch-load schools (single IN query instead of N individual selects)
+        Map<UUID, School> schoolMap = schoolRepository.findAllById(schoolIds).stream()
+                .collect(Collectors.toMap(School::getId, s -> s));
+
+        // Batch-load registrations (single IN query)
+        Map<UUID, Registration> registrationMap = registrationRepository.findAllById(registrationIds).stream()
+                .collect(Collectors.toMap(Registration::getId, r -> r));
+
+        return items.stream()
+                .map(item -> markSingle(user, item, schoolMap, registrationMap))
+                .toList();
+    }
+
+    /**
+     * Core save logic — shared by mark() (single) and markBulk() (batch).
+     * Receives pre-loaded school and registration maps to avoid redundant DB calls.
+     */
+    private AnnouncementResponse markSingle(User user, AnnouncementRequest request,
+                                             Map<UUID, School> schoolMap,
+                                             Map<UUID, Registration> registrationMap) {
+        School school = schoolMap.get(request.getSchoolId());
+        if (school == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "School not found");
+        }
+        assertSchoolAccess(user, school);
+        assertMonday(request.getWeekStart());
+
+        UUID registrationId = parseRegistrationId(request.getRegistrationId());
+        Registration registration = registrationMap.get(registrationId);
+        if (registration == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found");
+        }
+        if (!registration.getSchool().getId().equals(school.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Registration does not belong to the specified school");
+        }
+
+        String service = request.getService().toLowerCase(Locale.ROOT);
+        if (request.getProgress() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "progress is required to mark an announcement");
+        }
+        boolean enabled = service.equals("stem")
+                ? registration.getStemProgram() != null
+                : registration.getDigitalProgram() != null;
+        if (!enabled) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Registration does not have the requested program");
+        }
+
+        String key = registrationId + ":" + service + ":" + request.getWeekStart();
+        Announcement item = announcementRepository.findByKey(key).orElseGet(Announcement::new);
+        if (item.getSchool() != null && !item.getSchool().getId().equals(school.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This report key is already used by another school");
+        }
+        item.setKey(key);
+        item.setRegistrationId(registrationId.toString());
+        item.setService(service);
+        item.setWeekStart(request.getWeekStart());
+        item.setMessage(request.getMessage().trim());
+        item.setAnnouncedAt(LocalDateTime.now());
+        item.setSchool(school);
+        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE");
+        return toResponse(announcementRepository.save(item));
     }
 
     @PreAuthorize("hasAnyRole('ADMIN', 'ADMIN_SCHOOL', 'USER')")
@@ -155,73 +236,143 @@ public class AnnouncementService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Announcement not found"));
         assertSchoolAccess(user, item.getSchool());
         if (request == null || request.getProgress() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "progress is required to unmark an announcement");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "progress is required to unmark an announcement");
         }
         UUID registrationId = UUID.fromString(item.getRegistrationId());
         Registration registration = registrationRepository.findById(registrationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
-        validateAndUpdateProgress(registration, item.getService(), request == null ? null : request.getProgress(), "TODO");
+        validateAndUpdateProgress(registration, item.getService(), request.getProgress(), "TODO");
         announcementRepository.delete(item);
     }
 
+    /**
+     * Validate lesson targets and update progress — fixed issues:
+     *  1. Batch-loads StemPlan/StemPlanVersion/DigitalPlan with single IN queries
+     *     instead of findById() for each target (was O(N) queries, now O(1) + O(1)).
+     *  2. Batch-loads existing LessonProgress records with findAllByPlanItemIdIn().
+     *  3. Uses saveAll() for DONE updates instead of save() per record.
+     */
     private void validateAndUpdateProgress(Registration registration, String service,
                                            List<LessonProgressRequest> targets, String status) {
+        if (targets == null || targets.isEmpty()) return;
+
         String expectedType = service.equalsIgnoreCase("stem") ? "STEM" : "DIGITAL";
-        List<LessonProgressRequest> safeTargets = targets;
-        for (LessonProgressRequest target : safeTargets) {
-            if (target == null) {
+
+        // Collect planItemIds for batch loading
+        Set<UUID> planItemIds = new HashSet<>();
+        for (LessonProgressRequest target : targets) {
+            if (target == null || target.getPlanItemId() == null || target.getLessonId() == null
+                    || target.getLessonId().isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lesson progress target");
             }
             String type = target.getPlanType() == null ? "" : target.getPlanType().toUpperCase(Locale.ROOT);
-            if (!expectedType.equals(type) || target.getPlanItemId() == null || target.getLessonId() == null || target.getLessonId().isBlank()) {
+            if (!expectedType.equals(type)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid lesson progress target");
             }
-            if (expectedType.equals("STEM")) {
-                StemPlan plan = stemPlanRepository.findById(target.getPlanItemId()).orElse(null);
-                String courseId;
-                UUID planRegistrationId;
-                if (plan != null) {
-                    courseId = plan.getCourse().getId();
-                    planRegistrationId = plan.getRegistration().getId();
-                } else {
-                    com.example.beprojectweb.entity.StemPlanVersion version = stemPlanVersionRepository.findById(target.getPlanItemId())
-                            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found"));
-                    if (!version.isActive()) throw new ResponseStatusException(HttpStatus.CONFLICT, "This STEM plan assignment is no longer active");
-                    courseId = version.getCourse().getId();
-                    planRegistrationId = version.getRegistration().getId();
+            planItemIds.add(target.getPlanItemId());
+        }
+
+        // --- Validate targets by plan type (batch queries) ---
+        if (expectedType.equals("STEM")) {
+            // Batch-load all StemPlan records for the given IDs
+            Map<UUID, String> planIdToCourseId = new HashMap<>();
+            Map<UUID, UUID> planIdToRegistrationId = new HashMap<>();
+            stemPlanRepository.findAllById(planItemIds).forEach(plan -> {
+                planIdToCourseId.put(plan.getId(), plan.getCourse().getId());
+                planIdToRegistrationId.put(plan.getId(), plan.getRegistration().getId());
+            });
+
+            // For IDs not found in StemPlan, check StemPlanVersion
+            Set<UUID> missingIds = new HashSet<>(planItemIds);
+            missingIds.removeAll(planIdToCourseId.keySet());
+            if (!missingIds.isEmpty()) {
+                stemPlanVersionRepository.findAllById(missingIds).forEach(version -> {
+                    if (!version.isActive()) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "This STEM plan assignment is no longer active");
+                    }
+                    planIdToCourseId.put(version.getId(), version.getCourse().getId());
+                    planIdToRegistrationId.put(version.getId(), version.getRegistration().getId());
+                });
+            }
+
+            for (LessonProgressRequest target : targets) {
+                String courseId = planIdToCourseId.get(target.getPlanItemId());
+                UUID planRegId = planIdToRegistrationId.get(target.getPlanItemId());
+                if (courseId == null || planRegId == null) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found");
                 }
-                if (!planRegistrationId.equals(registration.getId())
+                if (!planRegId.equals(registration.getId())
                         || !stemLessonRepository.existsByIdAndCourse_Id(target.getLessonId(), courseId)) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lesson does not belong to this registration plan");
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Lesson does not belong to this registration plan");
                 }
-            } else {
-                DigitalPlan plan = digitalPlanRepository.findById(target.getPlanItemId())
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Digital plan not found"));
+            }
+
+        } else {
+            // Batch-load all DigitalPlan records
+            Map<UUID, DigitalPlan> digitalPlanMap = digitalPlanRepository.findAllById(planItemIds).stream()
+                    .collect(Collectors.toMap(DigitalPlan::getId, p -> p));
+
+            for (LessonProgressRequest target : targets) {
+                DigitalPlan plan = digitalPlanMap.get(target.getPlanItemId());
+                if (plan == null) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Digital plan not found");
+                }
                 if (!plan.getRegistration().getId().equals(registration.getId())
                         || registration.getDigitalProgram() == null
-                        || !digitalLessonRepository.existsByIdAndProgramAndGrade(target.getLessonId(), registration.getDigitalProgram(), plan.getGrade())) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lesson does not belong to this registration plan");
+                        || !digitalLessonRepository.existsByIdAndProgramAndGrade(
+                                target.getLessonId(), registration.getDigitalProgram(), plan.getGrade())) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Lesson does not belong to this registration plan");
                 }
             }
         }
-        for (LessonProgressRequest target : safeTargets) {
-            String type = expectedType;
-            if (status.equals("TODO")) {
-                lessonProgressRepository.deleteByPlanTypeAndPlanItemIdAndLessonId(type, target.getPlanItemId(), target.getLessonId());
-            } else {
-                LessonProgress progress = lessonProgressRepository.findByPlanTypeAndPlanItemIdAndLessonId(type, target.getPlanItemId(), target.getLessonId())
-                        .orElseGet(LessonProgress::new);
-                progress.setPlanType(type);
+
+        // --- Apply progress updates (batch) ---
+        if (status.equals("TODO")) {
+            // Individual deletes — no bulk delete API for (type, planItemId, lessonId) triples
+            for (LessonProgressRequest target : targets) {
+                lessonProgressRepository.deleteByPlanTypeAndPlanItemIdAndLessonId(
+                        expectedType, target.getPlanItemId(), target.getLessonId());
+            }
+        } else {
+            // Batch-load existing LessonProgress records for all planItemIds (single IN query)
+            Map<String, LessonProgress> existingByKey = lessonProgressRepository
+                    .findAllByPlanItemIdIn(planItemIds).stream()
+                    .filter(p -> expectedType.equals(p.getPlanType()))
+                    .collect(Collectors.toMap(
+                            p -> p.getPlanItemId() + ":" + p.getLessonId(),
+                            p -> p));
+
+            List<LessonProgress> toSave = new ArrayList<>(targets.size());
+            for (LessonProgressRequest target : targets) {
+                String progressKey = target.getPlanItemId() + ":" + target.getLessonId();
+                LessonProgress progress = existingByKey.getOrDefault(progressKey, new LessonProgress());
+                progress.setPlanType(expectedType);
                 progress.setPlanItemId(target.getPlanItemId());
                 progress.setLessonId(target.getLessonId());
                 progress.setStatus(status);
                 progress.setDate(LocalDate.now());
-                lessonProgressRepository.save(progress);
+                toSave.add(progress);
             }
+            // Single batch insert/update instead of N individual saves
+            lessonProgressRepository.saveAll(toSave);
         }
     }
 
-    private void assertMonday(java.time.LocalDate date) {
+    // --- Helpers ---
+
+    private UUID parseRegistrationId(String raw) {
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "registrationId must be a valid UUID");
+        }
+    }
+
+    private void assertMonday(LocalDate date) {
         if (date.getDayOfWeek() != DayOfWeek.MONDAY) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "weekStart must be a Monday");
         }
@@ -247,7 +398,9 @@ public class AnnouncementService {
     }
 
     private boolean isAdmin(User user) {
-        return user.getRoles() != null && (user.getRoles().contains(Role.ADMIN.name()) || user.getRoles().contains(Role.ADMIN_SCHOOL.name()));
+        return user.getRoles() != null
+                && (user.getRoles().contains(Role.ADMIN.name())
+                        || user.getRoles().contains(Role.ADMIN_SCHOOL.name()));
     }
 
     private AnnouncementResponse toResponse(Announcement item) {
