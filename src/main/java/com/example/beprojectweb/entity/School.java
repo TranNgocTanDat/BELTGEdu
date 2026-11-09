@@ -51,6 +51,12 @@ public class School {
     @Column(length = 40)
     String phone;
 
+    @Column(name = "zalo_group_stem", length = 300)
+    String zaloGroupStem;
+
+    @Column(name = "zalo_group_digital", length = 300)
+    String zaloGroupDigital;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     SchoolLevel level;

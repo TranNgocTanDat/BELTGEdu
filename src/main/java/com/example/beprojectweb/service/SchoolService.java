@@ -71,6 +71,8 @@ public class SchoolService {
                 .address(trimToNull(request.getAddress()))
                 .contactName(trimToNull(request.getContactName()))
                 .phone(trimToNull(request.getPhone()))
+                .zaloGroupStem(trimToNull(request.getZaloGroupStem()))
+                .zaloGroupDigital(trimToNull(request.getZaloGroupDigital()))
                 .level(request.getLevel())
                 .createdAt(LocalDate.now())
                 .region(region)
@@ -88,6 +90,8 @@ public class SchoolService {
         school.setAddress(trimToNull(request.getAddress()));
         school.setContactName(trimToNull(request.getContactName()));
         school.setPhone(trimToNull(request.getPhone()));
+        school.setZaloGroupStem(trimToNull(request.getZaloGroupStem()));
+        school.setZaloGroupDigital(trimToNull(request.getZaloGroupDigital()));
         school.setLevel(request.getLevel());
         if (isAdmin(user)) {
             school.setRegion(findRegion(request.getRegionId()));
@@ -169,6 +173,8 @@ public class SchoolService {
                 .address(school.getAddress())
                 .contactName(school.getContactName())
                 .phone(school.getPhone())
+                .zaloGroupStem(school.getZaloGroupStem())
+                .zaloGroupDigital(school.getZaloGroupDigital())
                 .level(school.getLevel())
                 .regionId(school.getRegion().getId())
                 .regionName(school.getRegion().getName())

@@ -38,6 +38,8 @@ CREATE TABLE `schools` (
   `address` varchar(500) DEFAULT NULL,
   `contact_name` varchar(150) DEFAULT NULL,
   `phone` varchar(40) DEFAULT NULL,
+  `zalo_group_stem` varchar(300) DEFAULT NULL,
+  `zalo_group_digital` varchar(300) DEFAULT NULL,
   `level` varchar(20) NOT NULL,
   `created_at` date NOT NULL,
   `region_id` binary(16) NOT NULL,

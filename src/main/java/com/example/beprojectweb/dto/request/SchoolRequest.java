@@ -26,6 +26,12 @@ public class SchoolRequest {
     @Size(max = 40)
     private String phone;
 
+    @Size(max = 300)
+    private String zaloGroupStem;
+
+    @Size(max = 300)
+    private String zaloGroupDigital;
+
     @NotNull
     private SchoolLevel level;
 

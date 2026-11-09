@@ -20,6 +20,8 @@ public class SchoolResponse {
     private String address;
     private String contactName;
     private String phone;
+    private String zaloGroupStem;
+    private String zaloGroupDigital;
     private SchoolLevel level;
     private UUID regionId;
     private String regionName;
