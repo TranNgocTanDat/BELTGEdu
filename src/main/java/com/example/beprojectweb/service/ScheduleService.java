@@ -22,6 +22,7 @@ import java.util.*;
 public class ScheduleService {
  private final RegistrationRepository registrations; private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
+ private final StemEventLessonRepository stemEventLessons;
  private final SchoolClosureRepository closures; private final AnnouncementRepository announcements; private final UserRepository users;
  private final HolidayRepository holidays;
  private record MutableWeek(LocalDate start,LinkedHashSet<String> labels,List<ScheduleWeekResponse.Item> items){}
@@ -58,6 +59,8 @@ public class ScheduleService {
           .stream().collect(java.util.stream.Collectors.groupingBy(l->l.getCourse().getId()));
   Map<Integer,List<StemPlan>> baseByTerm=basePlans.stream().collect(java.util.stream.Collectors.groupingBy(StemPlan::getTerm));
   Map<Integer,List<StemPlanVersion>> versionsByTerm=versions.stream().collect(java.util.stream.Collectors.groupingBy(StemPlanVersion::getTerm));
+  Map<Integer,StemEventLesson> eventsByGrade=stemEventLessons.findAllByOrderByGradeAsc().stream()
+          .collect(java.util.stream.Collectors.toMap(StemEventLesson::getGrade,event->event));
   LocalDate nextTerm=null;LocalDate[] starts={r.getTerm1Start(),r.getTerm2Start(),r.getTerm3Start(),r.getTerm4Start()};
   for(int term=1;term<=4;term++){
    LocalDate raw=starts[term-1];if(raw==null)continue;
@@ -77,12 +80,18 @@ public class ScheduleService {
       if(candidate.effectiveWeek()<=weekNo&&(assigned==null||candidate.effectiveWeek()>=assigned.effectiveWeek()))assigned=candidate;
      if(assigned==null)continue;
      List<StemLesson> catalog=lessonsByCourse.getOrDefault(assigned.course().getId(),List.of());
+     catalog=catalog.stream().filter(lesson->!isStemEventLesson(lesson)).toList();
      Map<String,StemLesson> byId=catalog.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
      List<String> ids=lessonOrders.getOrDefault(assigned.id(),List.of());List<StemLesson> ordered=new ArrayList<>();
      for(String lessonId:ids)if(byId.containsKey(lessonId)&&ordered.stream().noneMatch(item->item.getId().equals(lessonId)))ordered.add(byId.get(lessonId));
      for(StemLesson lesson:catalog)if(ordered.stream().noneMatch(item->item.getId().equals(lesson.getId())))ordered.add(lesson);
+     if(termLength==9&&weekNo==9){
+      StemEventLesson event=eventsByGrade.get(grade);
+      if(event!=null)row.items.add(new ScheduleWeekResponse.Item(grade,null,event.getTitle(),weekNo,term,original));
+      continue;
+     }
      int assignedIndex=weekNo-assigned.effectiveWeek();
-     List<StemLesson> scheduledLessons=ordered.stream().filter(lesson->termLength!=8||!isStemEventLesson(lesson)).limit(termLength).toList();
+     List<StemLesson> scheduledLessons=ordered.stream().limit(8).toList();
      if(assignedIndex>=0&&assignedIndex<scheduledLessons.size()){
       StemLesson lesson=scheduledLessons.get(assignedIndex);
       row.items.add(new ScheduleWeekResponse.Item(grade,assigned.course().getCode(),lesson.getTitle(),weekNo,term,original));

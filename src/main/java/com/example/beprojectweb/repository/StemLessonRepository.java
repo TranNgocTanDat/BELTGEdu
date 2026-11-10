@@ -12,6 +12,7 @@ public interface StemLessonRepository extends JpaRepository<StemLesson, String> 
     boolean existsByCourse_IdAndLessonOrder(String courseId, Integer lessonOrder);
     List<StemLesson> findAllByCourse_IdOrderByLessonOrderAsc(String courseId);
     List<StemLesson> findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(Collection<String> courseIds);
+    List<StemLesson> findAllByTitleIgnoreCase(String title);
 }
 
 

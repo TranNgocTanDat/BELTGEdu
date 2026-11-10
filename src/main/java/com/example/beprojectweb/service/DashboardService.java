@@ -17,7 +17,7 @@ import java.util.*;
 @Service @RequiredArgsConstructor
 public class DashboardService {
  private final SchoolRepository schools; private final RegistrationRepository registrations; private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans;
- private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons; private final LessonProgressRepository progress; private final UserRepository users; private final ScheduleService schedule;
+ private final StemLessonRepository stemLessons; private final StemEventLessonRepository stemEventLessons; private final DigitalLessonRepository digitalLessons; private final LessonProgressRepository progress; private final UserRepository users; private final ScheduleService schedule;
  private record StemAssignment(UUID id,int effectiveWeek,String courseId){}
  private static class Counts {int done,doing,total; void add(String status){total++;if("DONE".equals(status))done++;else if("DOING".equals(status))doing++;} DashboardSummaryResponse.Progress dto(){return new DashboardSummaryResponse.Progress(done,doing,total);}}
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional(readOnly=true)
@@ -30,6 +30,7 @@ public class DashboardService {
   Map<UUID,List<String>> orderByPlan=new HashMap<>();if(!stemPlanIds.isEmpty())stemLessonOrders.findAllByPlanItemIdInOrderByPlanItemIdAscPositionAsc(stemPlanIds).forEach(row->orderByPlan.computeIfAbsent(row.getPlanItemId(),key->new ArrayList<>()).add(row.getLessonId()));
   List<String> courseIds=new ArrayList<>();sPlans.forEach(p->courseIds.add(p.getCourse().getId()));sVersions.forEach(p->courseIds.add(p.getCourse().getId()));
   Map<String,List<StemLesson>> lessonsByCourse=courseIds.isEmpty()?Map.of():stemLessons.findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(courseIds.stream().distinct().toList()).stream().collect(java.util.stream.Collectors.groupingBy(l->l.getCourse().getId()));
+  Map<Integer,StemEventLesson> eventsByGrade=stemEventLessons.findAllByOrderByGradeAsc().stream().collect(java.util.stream.Collectors.toMap(StemEventLesson::getGrade,event->event));
   Map<String,List<StemAssignment>> assignments=new HashMap<>();
   sPlans.forEach(p->assignments.computeIfAbsent(stemPlanKey(p.getRegistration().getId(),p.getGrade(),p.getTerm()),key->new ArrayList<>()).add(new StemAssignment(p.getId(),p.getEffectiveFromWeek()==null?1:p.getEffectiveFromWeek(),p.getCourse().getId())));
   sVersions.forEach(p->assignments.computeIfAbsent(stemPlanKey(p.getRegistration().getId(),p.getGrade(),p.getTerm()),key->new ArrayList<>()).add(new StemAssignment(p.getId(),p.getEffectiveFromWeek(),p.getCourse().getId())));
@@ -37,8 +38,10 @@ public class DashboardService {
    int termLength=termWeeks(r,term);List<StemAssignment> termAssignments=assignments.getOrDefault(stemPlanKey(r.getId(),grade,term),List.of());
    for(int weekNo=1;weekNo<=termLength;weekNo++){
     StemAssignment assigned=null;for(StemAssignment candidate:termAssignments)if(candidate.effectiveWeek()<=weekNo&&(assigned==null||candidate.effectiveWeek()>=assigned.effectiveWeek()))assigned=candidate;
-    if(assigned==null)continue;List<StemLesson> ordered=orderedLessons(assigned,lessonsByCourse,orderByPlan);
-    List<StemLesson> scheduledLessons=ordered.stream().filter(lesson->termLength!=8||!isEventLesson(lesson)).limit(termLength).toList();
+    if(assigned==null)continue;
+    if(termLength==9&&weekNo==9){StemEventLesson event=eventsByGrade.get(grade);if(event!=null)stem.add(status.get("STEM:"+assigned.id()+":"+event.getId()));continue;}
+    List<StemLesson> ordered=orderedLessons(assigned,lessonsByCourse,orderByPlan);
+    List<StemLesson> scheduledLessons=ordered.stream().filter(lesson->!isEventLesson(lesson)).limit(8).toList();
     int lessonIndex=weekNo-assigned.effectiveWeek();if(lessonIndex>=0&&lessonIndex<scheduledLessons.size()){StemLesson lesson=scheduledLessons.get(lessonIndex);stem.add(status.get("STEM:"+assigned.id()+":"+lesson.getId()));}
    }
   }
@@ -52,7 +55,7 @@ public class DashboardService {
  private String stemPlanKey(UUID registrationId,Integer grade,Integer term){return registrationId+":"+grade+":"+term;}
  private int termWeeks(Registration registration,int term){Integer value=registration.getStemTermWeeks()==null?null:registration.getStemTermWeeks().get(term);return Integer.valueOf(8).equals(value)?8:9;}
  private List<StemLesson> orderedLessons(StemAssignment assignment,Map<String,List<StemLesson>> lessonsByCourse,Map<UUID,List<String>> orderByPlan){
-  List<StemLesson> canonical=lessonsByCourse.getOrDefault(assignment.courseId(),List.of());Map<String,StemLesson> byId=new HashMap<>();canonical.forEach(lesson->byId.put(lesson.getId(),lesson));List<StemLesson> ordered=new ArrayList<>();
+  List<StemLesson> canonical=lessonsByCourse.getOrDefault(assignment.courseId(),List.of()).stream().filter(lesson->!isEventLesson(lesson)).toList();Map<String,StemLesson> byId=new HashMap<>();canonical.forEach(lesson->byId.put(lesson.getId(),lesson));List<StemLesson> ordered=new ArrayList<>();
   for(String id:orderByPlan.getOrDefault(assignment.id(),List.of())){StemLesson lesson=byId.get(id);if(lesson!=null&&ordered.stream().noneMatch(item->item.getId().equals(id)))ordered.add(lesson);}
   for(StemLesson lesson:canonical)if(ordered.stream().noneMatch(item->item.getId().equals(lesson.getId())))ordered.add(lesson);return ordered;
  }

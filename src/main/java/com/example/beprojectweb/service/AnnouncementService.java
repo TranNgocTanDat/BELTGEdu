@@ -10,6 +10,7 @@ import com.example.beprojectweb.entity.DigitalPlan;
 import com.example.beprojectweb.entity.LessonProgress;
 import com.example.beprojectweb.entity.Registration;
 import com.example.beprojectweb.entity.School;
+import com.example.beprojectweb.entity.StemLesson;
 import com.example.beprojectweb.entity.StemPlan;
 import com.example.beprojectweb.entity.User;
 import com.example.beprojectweb.enums.Role;
@@ -22,6 +23,7 @@ import com.example.beprojectweb.repository.LessonProgressRepository;
 import com.example.beprojectweb.repository.RegistrationRepository;
 import com.example.beprojectweb.repository.SchoolRepository;
 import com.example.beprojectweb.repository.StemLessonRepository;
+import com.example.beprojectweb.repository.StemEventLessonRepository;
 import com.example.beprojectweb.repository.StemPlanRepository;
 import com.example.beprojectweb.repository.StemPlanVersionRepository;
 import com.example.beprojectweb.repository.UserRepository;
@@ -59,6 +61,7 @@ public class AnnouncementService {
     private final StemPlanVersionRepository stemPlanVersionRepository;
     private final DigitalPlanRepository digitalPlanRepository;
     private final StemLessonRepository stemLessonRepository;
+    private final StemEventLessonRepository stemEventLessonRepository;
     private final DigitalLessonRepository digitalLessonRepository;
     private final LessonProgressRepository lessonProgressRepository;
 
@@ -278,9 +281,13 @@ public class AnnouncementService {
             // Batch-load all StemPlan records for the given IDs
             Map<UUID, String> planIdToCourseId = new HashMap<>();
             Map<UUID, UUID> planIdToRegistrationId = new HashMap<>();
+            Map<UUID, Integer> planIdToGrade = new HashMap<>();
+            Map<UUID, Integer> planIdToTerm = new HashMap<>();
             stemPlanRepository.findAllById(planItemIds).forEach(plan -> {
                 planIdToCourseId.put(plan.getId(), plan.getCourse().getId());
                 planIdToRegistrationId.put(plan.getId(), plan.getRegistration().getId());
+                planIdToGrade.put(plan.getId(), plan.getGrade());
+                planIdToTerm.put(plan.getId(), plan.getTerm());
             });
 
             // For IDs not found in StemPlan, check StemPlanVersion
@@ -294,17 +301,28 @@ public class AnnouncementService {
                     }
                     planIdToCourseId.put(version.getId(), version.getCourse().getId());
                     planIdToRegistrationId.put(version.getId(), version.getRegistration().getId());
+                    planIdToGrade.put(version.getId(), version.getGrade());
+                    planIdToTerm.put(version.getId(), version.getTerm());
                 });
             }
 
             for (LessonProgressRequest target : targets) {
                 String courseId = planIdToCourseId.get(target.getPlanItemId());
                 UUID planRegId = planIdToRegistrationId.get(target.getPlanItemId());
+                Integer grade = planIdToGrade.get(target.getPlanItemId());
+                Integer term = planIdToTerm.get(target.getPlanItemId());
                 if (courseId == null || planRegId == null) {
                     throw new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM plan not found");
                 }
-                if (!planRegId.equals(registration.getId())
-                        || !stemLessonRepository.existsByIdAndCourse_Id(target.getLessonId(), courseId)) {
+                StemLesson selectedLesson = stemLessonRepository.findById(target.getLessonId()).orElse(null);
+                boolean regularLesson = selectedLesson != null && !isStemEventLesson(selectedLesson)
+                        && selectedLesson.getCourse().getId().equals(courseId);
+                boolean sharedEvent = planRegId.equals(registration.getId()) && grade != null && term != null
+                        && registration.getStemGrades().contains(grade)
+                        && termWeeks(registration, term) == 9
+                        && isWeekNinePlan(registration, grade, term, target.getPlanItemId())
+                        && stemEventLessonRepository.existsByIdAndGrade(target.getLessonId(), grade);
+                if (!planRegId.equals(registration.getId()) || (!regularLesson && !sharedEvent)) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Lesson does not belong to this registration plan");
                 }
@@ -360,6 +378,37 @@ public class AnnouncementService {
             // Single batch insert/update instead of N individual saves
             lessonProgressRepository.saveAll(toSave);
         }
+    }
+
+    private boolean isStemEventLesson(StemLesson lesson) {
+        return lesson.getTitle() != null
+                && lesson.getTitle().trim().equalsIgnoreCase("Event tổng kết học phần");
+    }
+
+    private boolean isWeekNinePlan(Registration registration, Integer grade, Integer term, UUID planItemId) {
+        StemPlan base = stemPlanRepository.findByRegistration_IdAndGradeAndTerm(registration.getId(), grade, term)
+                .orElse(null);
+        List<com.example.beprojectweb.entity.StemPlanVersion> versions = stemPlanVersionRepository
+                .findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(registration.getId(), grade, term)
+                .stream().filter(com.example.beprojectweb.entity.StemPlanVersion::isActive).toList();
+        UUID activePlanId = null;
+        int activeStart = -1;
+        if (base != null) {
+            activePlanId = base.getId();
+            activeStart = base.getEffectiveFromWeek() == null ? 1 : base.getEffectiveFromWeek();
+        }
+        for (com.example.beprojectweb.entity.StemPlanVersion version : versions) {
+            if (version.getEffectiveFromWeek() <= 9 && version.getEffectiveFromWeek() >= activeStart) {
+                activePlanId = version.getId();
+                activeStart = version.getEffectiveFromWeek();
+            }
+        }
+        return planItemId.equals(activePlanId);
+    }
+
+    private int termWeeks(Registration registration, int term) {
+        Integer configured = registration.getStemTermWeeks() == null ? null : registration.getStemTermWeeks().get(term);
+        return Integer.valueOf(8).equals(configured) ? 8 : 9;
     }
 
     // --- Helpers ---

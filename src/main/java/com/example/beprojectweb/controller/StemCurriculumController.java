@@ -4,11 +4,14 @@ import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.StemCourseRequest;
 import com.example.beprojectweb.dto.request.StemLessonCreateRequest;
+import com.example.beprojectweb.dto.request.StemEventLessonRequest;
 import com.example.beprojectweb.dto.response.StemCourseResponse;
 import com.example.beprojectweb.dto.response.StemLessonResponse;
+import com.example.beprojectweb.dto.response.StemEventLessonResponse;
 import com.example.beprojectweb.enums.StemProgram;
 import com.example.beprojectweb.enums.StemSubject;
 import com.example.beprojectweb.service.StemCurriculumService;
+import com.example.beprojectweb.service.StemEventCatalogService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +32,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class StemCurriculumController {
     private final StemCurriculumService curriculumService;
+    private final StemEventCatalogService eventCatalogService;
 
     @GetMapping
     @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'ADMIN_SCHOOL')")
@@ -38,6 +42,18 @@ public class StemCurriculumController {
             @RequestParam(required = false) Integer grade) {
         return APIResponse.<List<StemCourseResponse>>builder()
                 .result(curriculumService.getCourses(program, subject, grade)).build();
+    }
+
+    @GetMapping("/events")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN', 'ADMIN_SCHOOL')")
+    public APIResponse<List<StemEventLessonResponse>> getEvents() {
+        return APIResponse.<List<StemEventLessonResponse>>builder().result(eventCatalogService.getEvents()).build();
+    }
+
+    @PutMapping("/events/{grade}")
+    public APIResponse<StemEventLessonResponse> saveEvent(@PathVariable Integer grade,
+            @RequestBody @jakarta.validation.Valid StemEventLessonRequest request) {
+        return APIResponse.<StemEventLessonResponse>builder().result(eventCatalogService.saveEvent(grade, request)).build();
     }
 
     @PostMapping("/courses")

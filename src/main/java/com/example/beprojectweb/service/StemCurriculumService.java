@@ -49,6 +49,7 @@ public class StemCurriculumService {
         List<String> courseIds = courses.stream().map(StemCourse::getId).toList();
         Map<String, List<StemLessonResponse>> lessonsByCourse = lessonRepository
                 .findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(courseIds).stream()
+                .filter(lesson -> !isStemEventLesson(lesson))
                 .collect(Collectors.groupingBy(lesson -> lesson.getCourse().getId(), HashMap::new,
                         Collectors.mapping(this::toLessonResponse, Collectors.toList())));
 
@@ -57,11 +58,23 @@ public class StemCurriculumService {
                 .toList();
     }
 
+    private boolean isStemEventLesson(StemLesson lesson) {
+        return isStemEventTitle(lesson.getTitle());
+    }
+
+    private boolean isStemEventTitle(String title) {
+        return title != null && title.trim().equalsIgnoreCase("Event tổng kết học phần");
+    }
+
     @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
     @Transactional
     public StemLessonResponse renameLesson(String id, LessonTitleRequest request) {
         StemLesson lesson = lessonRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM lesson not found"));
+        if (isStemEventTitle(request.getTitle())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Event tổng kết được quản lý dùng chung theo khối, không thêm Event vào từng khóa.");
+        }
         lesson.setTitle(request.getTitle().trim());
         if (request.getNote() != null) lesson.setNote(normalizeOptional(request.getNote()));
         if (request.getDriveImageUrl() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrl()));
@@ -94,6 +107,7 @@ public class StemCurriculumService {
         course = courseFrom(request, course);
         course = courseRepository.save(course);
         return toCourseResponse(course, lessonRepository.findAllByCourse_IdOrderByLessonOrderAsc(id).stream()
+                .filter(lesson -> !isStemEventLesson(lesson))
                 .map(this::toLessonResponse).toList());
     }
 
@@ -120,6 +134,10 @@ public class StemCurriculumService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM course not found"));
         Set<Integer> requestedOrders = new HashSet<>();
         for (StemLessonCreateRequest request : requests) {
+            if (isStemEventTitle(request.getTitle())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Event tổng kết được quản lý dùng chung theo khối, không thêm Event vào từng khóa.");
+            }
             if (!requestedOrders.add(request.getOrder())) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                         "Vị trí bài học " + request.getOrder() + " bị trùng trong danh sách gửi lên.");

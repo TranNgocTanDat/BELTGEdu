@@ -21,6 +21,7 @@ public class StudyPlanService {
  private final RegistrationRepository registrations; private final SchoolRepository schools; private final UserRepository users;
  private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans; private final LessonProgressRepository progress;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
+ private final StemEventLessonRepository stemEventLessons;
  private final AnnouncementRepository announcements; private final SchoolClosureRepository closures; private final HolidayRepository holidays;
 
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional(readOnly=true)
@@ -150,7 +151,8 @@ public class StudyPlanService {
   if(assignment==null)assignment=versions.stream().filter(v->v.getId().equals(req.getPlanItemId())&&v.isActive()).findFirst()
           .orElseThrow(()->notFound("STEM plan assignment not found or inactive"));
   if(!assignment.getGrade().equals(grade)||!assignment.getTerm().equals(term))throw bad("The STEM plan assignment does not match grade and term");
-  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
+  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId()).stream()
+          .filter(lesson->!isStemEventLesson(lesson)).toList();
   if(lessons.isEmpty())throw new ResponseStatusException(HttpStatus.CONFLICT,"Khóa học chưa có bài học để sắp xếp.");
   int termLength=termWeeks(r,term);
   List<String> canonical=lessons.stream().map(StemLesson::getId).toList();
@@ -217,16 +219,26 @@ public class StudyPlanService {
   if(req.getPlanItemId()==null||req.getLessonId()==null||req.getLessonId().isBlank())throw bad("planItemId and lessonId are required");
   Registration reg;
   if(type.equals("STEM")){
-   String courseId;
+   String courseId;int grade;int term;
    StemPlan p=stemPlans.findById(req.getPlanItemId()).orElse(null);
-   if(p!=null){reg=p.getRegistration();courseId=p.getCourse().getId();}
+   if(p!=null){reg=p.getRegistration();courseId=p.getCourse().getId();grade=p.getGrade();term=p.getTerm();}
    else{
     StemPlanVersion v=stemPlanVersions.findById(req.getPlanItemId()).orElseThrow(()->notFound("STEM plan not found"));
     if(!v.isActive())throw notFound("STEM plan assignment is no longer active");
-    reg=v.getRegistration();courseId=v.getCourse().getId();
+    reg=v.getRegistration();courseId=v.getCourse().getId();grade=v.getGrade();term=v.getTerm();
    }
    assertAccess(current(),reg.getSchool());
-   if(!stemLessons.existsByIdAndCourse_Id(req.getLessonId(),courseId))throw notFound("Lesson does not belong to this course");
+   StemLesson selectedLesson=stemLessons.findById(req.getLessonId()).orElse(null);
+   boolean regularLesson=selectedLesson!=null&&!isStemEventLesson(selectedLesson)
+           &&selectedLesson.getCourse().getId().equals(courseId);
+   StemPlan baseForTerm=stemPlans.findByRegistration_IdAndGradeAndTerm(reg.getId(),grade,term).orElse(null);
+   List<StemPlanVersion> versionsForTerm=stemPlanVersions
+           .findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(reg.getId(),grade,term);
+   StemPlanVersion weekNineAssignment=activeAssignmentAt(baseForTerm,versionsForTerm,9);
+   boolean sharedEvent=reg.getStemGrades().contains(grade)&&termWeeks(reg,term)==9
+           &&weekNineAssignment!=null&&weekNineAssignment.getId().equals(req.getPlanItemId())
+           &&stemEventLessons.existsByIdAndGrade(req.getLessonId(),grade);
+   if(!regularLesson&&!sharedEvent)throw notFound("Lesson does not belong to this course or grade Event");
   }else{
    DigitalPlan p=digitalPlans.findById(req.getPlanItemId()).orElseThrow(()->notFound("Digital plan not found"));
    reg=p.getRegistration();assertAccess(current(),reg.getSchool());
@@ -295,7 +307,8 @@ public class StudyPlanService {
  }
 
  private List<String> scheduledLessonIds(StemPlanVersion assignment,int termLength){
-  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
+  List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId()).stream()
+          .filter(lesson->!isStemEventLesson(lesson)).toList();
   List<String> stored=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(assignment.getId()).stream()
           .map(StemPlanLessonOrder::getLessonId).toList();
   return scheduledLessonIds(stored,lessons,termLength);
@@ -308,13 +321,14 @@ public class StudyPlanService {
  }
 
  private List<String> scheduledLessonIds(List<String> requestedOrder,List<StemLesson> lessons,int termLength){
-  List<String> canonical=lessons.stream().map(StemLesson::getId).toList();
-  Map<String,StemLesson> byId=lessons.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
+  List<StemLesson> regularLessons=lessons.stream().filter(lesson->!isStemEventLesson(lesson)).toList();
+  List<String> canonical=regularLessons.stream().map(StemLesson::getId).toList();
+  Map<String,StemLesson> byId=regularLessons.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
   List<String> ordered=new ArrayList<>();
   if(requestedOrder!=null)for(String lessonId:requestedOrder)
    if(byId.containsKey(lessonId)&&!ordered.contains(lessonId))ordered.add(lessonId);
   for(String lessonId:canonical)if(!ordered.contains(lessonId))ordered.add(lessonId);
-  return ordered.stream().filter(id->termLength!=8||!isStemEventLesson(byId.get(id))).limit(termLength).toList();
+  return ordered.stream().limit(Math.min(8,termLength)).toList();
  }
 
  private boolean isStemEventLesson(StemLesson lesson){
@@ -367,10 +381,10 @@ public class StudyPlanService {
    }
    for(int weekNo=1;weekNo<=lastWeek;weekNo++){
     StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);if(assignment==null)continue;
-    int lessonIndex=weekNo-assignment.getEffectiveFromWeek();
     List<String> before=beforeByPlan.getOrDefault(assignment.getId(),List.of()),after=afterByPlan.getOrDefault(assignment.getId(),List.of());
-    String beforeId=lessonIndex>=0&&lessonIndex<before.size()?before.get(lessonIndex):null;
-    String afterId=lessonIndex>=0&&lessonIndex<after.size()?after.get(lessonIndex):null;
+    String eventId=stemEventLessons.findByGrade(grade).map(StemEventLesson::getId).orElse(null);
+    String beforeId=lessonIdAtWeek(before,weekNo,assignment.getEffectiveFromWeek(),oldLength,eventId);
+    String afterId=lessonIdAtWeek(after,weekNo,assignment.getEffectiveFromWeek(),newLength,eventId);
     if(Objects.equals(beforeId,afterId))continue;
     LocalDate oldDate=weekNo<=oldDates.size()?oldDates.get(weekNo-1):null;
     LocalDate newDate=weekNo<=newDates.size()?newDates.get(weekNo-1):null;
@@ -381,6 +395,12 @@ public class StudyPlanService {
    }
   }
   return false;
+ }
+
+ private String lessonIdAtWeek(List<String> regularLessonIds,int weekNo,int assignmentStart,int termLength,String eventId){
+  if(weekNo==9&&termLength==9)return eventId;
+  int lessonIndex=weekNo-assignmentStart;
+  return lessonIndex>=0&&lessonIndex<regularLessonIds.size()?regularLessonIds.get(lessonIndex):null;
  }
 
  private boolean hasProgressInTerm(Registration registration,int term){
@@ -406,11 +426,11 @@ public class StudyPlanService {
    boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+weekStart).isPresent();
    StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);
    if(!protectedWeek&&assignment!=null){
-    int lessonIndex=weekNo-assignment.getEffectiveFromWeek();
     List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
     List<String> order=scheduledLessonIds(assignment.getId(),lessons,termLength);
-    if(lessonIndex>=0&&lessonIndex<order.size())
-     protectedWeek=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),order.get(lessonIndex)).isPresent();
+    String lessonId=lessonIdAtWeek(order,weekNo,assignment.getEffectiveFromWeek(),termLength,
+            stemEventLessons.findByGrade(assignment.getGrade()).map(StemEventLesson::getId).orElse(null));
+    if(lessonId!=null)protectedWeek=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),lessonId).isPresent();
    }
    if(protectedWeek)lastProtected=weekNo;
   }

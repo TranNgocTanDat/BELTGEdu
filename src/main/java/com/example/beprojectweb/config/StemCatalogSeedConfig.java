@@ -4,6 +4,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -12,6 +13,7 @@ import javax.sql.DataSource;
 @Configuration
 public class StemCatalogSeedConfig {
     @Bean
+    @Order(1)
     ApplicationRunner seedStemCatalog(DataSource dataSource, JdbcTemplate jdbc) {
         return args -> {
             jdbc.execute("CREATE TABLE IF NOT EXISTS curriculum_seed_history (seed_key varchar(80) NOT NULL PRIMARY KEY, seeded_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP)");
