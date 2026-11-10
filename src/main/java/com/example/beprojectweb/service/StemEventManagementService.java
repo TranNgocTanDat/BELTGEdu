@@ -126,11 +126,17 @@ public class StemEventManagementService {
 
         List<RegistrationStemEventsRequest.Assignment> requested = request.getAssignments() == null
                 ? List.of() : request.getAssignments();
+        List<RegistrationStemEvent> existing = assignmentRepository
+                .findAllByRegistration_IdOrderByTermAscEventDateAsc(registrationId);
+        Map<String, RegistrationStemEvent> existingByKey = existing.stream().collect(Collectors.toMap(
+                item -> item.getTerm() + ":" + item.getEvent().getId(), Function.identity()));
         Set<String> uniqueEvents = new HashSet<>();
         for (RegistrationStemEventsRequest.Assignment item : requested) {
             String key = item.getTerm() + ":" + item.getEventId();
             if (!uniqueEvents.add(key)) throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Không thể chọn trùng một Event trong cùng học phần.");
+            RegistrationStemEvent existingAssignment = existingByKey.get(key);
+            if (existingAssignment != null && existingAssignment.getEventDate().equals(item.getEventDate())) continue;
             LocalDate start = termStart(registration, item.getTerm());
             if (start == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Hãy thiết lập ngày bắt đầu học phần trước khi xếp Event.");
@@ -149,10 +155,6 @@ public class StemEventManagementService {
                     HttpStatus.BAD_REQUEST, "Event cần có nội dung cho toàn bộ khối đã đăng ký.");
         }
 
-        List<RegistrationStemEvent> existing = assignmentRepository
-                .findAllByRegistration_IdOrderByTermAscEventDateAsc(registrationId);
-        Map<String, RegistrationStemEvent> existingByKey = existing.stream().collect(Collectors.toMap(
-                item -> item.getTerm() + ":" + item.getEvent().getId(), Function.identity()));
         Set<String> kept = new HashSet<>();
         List<RegistrationStemEvent> saved = new ArrayList<>();
         for (RegistrationStemEventsRequest.Assignment item : requested) {
