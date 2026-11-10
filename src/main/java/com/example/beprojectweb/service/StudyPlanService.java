@@ -22,6 +22,8 @@ public class StudyPlanService {
  private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans; private final LessonProgressRepository progress;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
  private final StemEventLessonRepository stemEventLessons;
+ private final StemEventGradeLessonRepository stemEventGradeLessons; private final RegistrationStemEventRepository registrationStemEvents;
+ private final ScheduleService scheduleService;
  private final AnnouncementRepository announcements; private final SchoolClosureRepository closures; private final HolidayRepository holidays;
 
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional(readOnly=true)
@@ -35,6 +37,7 @@ public class StudyPlanService {
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
  public void delete(UUID id){
   Registration r=findRegistration(id); assertAccess(current(),r.getSchool());
+  registrationStemEvents.deleteAllByRegistration_Id(id);
   for(StemPlanVersion p:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlanVersions.delete(p);}
   for(StemPlan p:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("STEM",p.getId());stemLessonOrders.deleteAllByPlanItemId(p.getId());stemPlans.delete(p);}
   for(DigitalPlan p:digitalPlans.findAllByRegistration_IdOrderByGradeAsc(id)){progress.deleteAllByPlanTypeAndPlanItemId("DIGITAL",p.getId());digitalPlans.delete(p);}
@@ -70,7 +73,7 @@ public class StudyPlanService {
   if(term<1||term>4)throw bad("term must be between 1 and 4");
   StemPlan base=stemPlans.findByRegistration_IdAndGradeAndTerm(r.getId(),grade,term).orElse(null);
   List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(r.getId(),grade,term);
-  int safeWeek=firstEditableStemWeek(r,term,base,versions);
+  int safeWeek=firstEditableStemWeek(r,grade,term);
   int requestedWeek=req.getEffectiveFromWeek()==null?safeWeek:req.getEffectiveFromWeek();
   if(requestedWeek<1||requestedWeek>termWeeks(r,term))throw bad("effectiveFromWeek must be between 1 and "+termWeeks(r,term));
   if(requestedWeek!=safeWeek)throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -166,17 +169,21 @@ public class StudyPlanService {
   for(String lessonId:canonical)if(!currentOrder.contains(lessonId))currentOrder.add(lessonId);
   List<String> currentScheduledOrder=scheduledLessonIds(currentOrder,lessons,termLength);
   List<String> requestedScheduledOrder=scheduledLessonIds(req.getLessonIds(),lessons,termLength);
-  List<LocalDate> weeks=scheduledStemWeeks(r,term);
-  if(weeks.size()!=termLength)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể xác định đủ số tuần của học phần.");
+  List<ScheduleWeekResponse> weeks=scheduleService.allWeeksForSummary(r.getId(),"stem");
   int start=assignment.getEffectiveFromWeek();
   int end=termLength;
   for(StemPlanVersion other:versions)
    if(other.isActive()&&other.getEffectiveFromWeek()>start)end=Math.min(end,other.getEffectiveFromWeek()-1);
   if(start>end)throw new ResponseStatusException(HttpStatus.CONFLICT,"Phân đoạn khóa học không có tuần hợp lệ để sắp xếp.");
+  final UUID assignmentId=assignment.getId();
   for(int weekNo=start;weekNo<=end;weekNo++){
    int position=weekNo-start;
    if(position>=currentScheduledOrder.size()||position>=requestedScheduledOrder.size())break;
-   boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+weeks.get(weekNo-1)).isPresent();
+   final int currentWeekNo=weekNo;
+   LocalDate scheduledDate=weeks.stream().filter(week->week.items().stream().anyMatch(item->!item.event()
+           &&assignmentId.equals(item.planItemId())&&Objects.equals(item.term(),term)&&Objects.equals(item.lessonNo(),currentWeekNo)))
+           .map(ScheduleWeekResponse::weekStart).findFirst().orElse(null);
+   boolean protectedWeek=scheduledDate!=null&&announcements.findByKey(r.getId()+":stem:"+scheduledDate).isPresent();
    String lessonId=currentScheduledOrder.get(position);
    Optional<LessonProgress> saved=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),lessonId);
    protectedWeek|=saved.isPresent()&&!"TODO".equalsIgnoreCase(saved.get().getStatus());
@@ -231,13 +238,13 @@ public class StudyPlanService {
    StemLesson selectedLesson=stemLessons.findById(req.getLessonId()).orElse(null);
    boolean regularLesson=selectedLesson!=null&&!isStemEventLesson(selectedLesson)
            &&selectedLesson.getCourse().getId().equals(courseId);
-   StemPlan baseForTerm=stemPlans.findByRegistration_IdAndGradeAndTerm(reg.getId(),grade,term).orElse(null);
-   List<StemPlanVersion> versionsForTerm=stemPlanVersions
-           .findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(reg.getId(),grade,term);
-   StemPlanVersion weekNineAssignment=activeAssignmentAt(baseForTerm,versionsForTerm,9);
-   boolean sharedEvent=reg.getStemGrades().contains(grade)&&termWeeks(reg,term)==9
-           &&weekNineAssignment!=null&&weekNineAssignment.getId().equals(req.getPlanItemId())
-           &&stemEventLessons.existsByIdAndGrade(req.getLessonId(),grade);
+   StemEventGradeLesson eventLesson=stemEventGradeLessons.findById(req.getLessonId()).orElse(null);
+   boolean sharedEvent=reg.getStemGrades().contains(grade)&&eventLesson!=null&&eventLesson.getGrade().equals(grade)
+           &&registrationStemEvents.findByRegistration_IdAndTermAndEvent_Id(reg.getId(),term,eventLesson.getEvent().getId()).isPresent()
+           &&scheduleService.allWeeksForSummary(reg.getId(),"stem").stream().anyMatch(week->week.items().stream()
+                   .anyMatch(item->item.event()&&Objects.equals(item.term(),term)
+                           &&Objects.equals(item.planItemId(),req.getPlanItemId())
+                           &&Objects.equals(item.lessonId(),eventLesson.getId())));
    if(!regularLesson&&!sharedEvent)throw notFound("Lesson does not belong to this course or grade Event");
   }else{
    DigitalPlan p=digitalPlans.findById(req.getPlanItemId()).orElseThrow(()->notFound("Digital plan not found"));
@@ -342,10 +349,8 @@ public class StudyPlanService {
   for(int term=1;term<=4;term++){
    int oldLength=oldWeeks.get(term),newLength=newWeeks.get(term);
    if(oldLength==newLength)continue;
-   List<LocalDate> oldDates=scheduledStemWeeks(registration,term,oldWeeks);
-   List<LocalDate> newDates=scheduledStemWeeks(registration,term,newWeeks);
-   if(hasHistoryOnChangedStemSlots(registration,term,oldLength,newLength,oldDates,newDates))
-    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì lịch bài tại một tuần đã báo hoặc có tiến độ sẽ thay đổi.");
+   if(hasHistoryInStemTerm(registration,term))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần này đã có báo bài hoặc tiến độ.");
    if(newLength<oldLength){
     final int changedTerm=term;
     if(stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(registration.getId()).stream()
@@ -355,52 +360,26 @@ public class StudyPlanService {
      throw new ResponseStatusException(HttpStatus.CONFLICT,"Có kế hoạch đổi khóa bắt đầu sau tuần "+newLength+"; hãy xử lý kế hoạch đó trước khi rút ngắn học phần.");
    }
    for(int later=term+1;later<=4;later++){
-    for(LocalDate date:scheduledStemWeeks(registration,later))
-     if(announcements.findByKey(registration.getId()+":stem:"+date).isPresent())
-      throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có báo bài; cần giữ nguyên ngày lịch sử.");
+    final int laterTerm=later;
+    boolean announcedLater=scheduleService.allWeeksForSummary(registration.getId(),"stem").stream()
+            .filter(week->week.items().stream().anyMatch(item->Objects.equals(item.term(),laterTerm)))
+            .anyMatch(week->announcements.findByKey(registration.getId()+":stem:"+week.weekStart()).isPresent());
+    if(announcedLater)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có báo bài; cần giữ nguyên ngày lịch sử.");
     if(hasProgressInTerm(registration,later))
      throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có tiến độ; cần giữ nguyên kế hoạch lịch sử.");
    }
   }
  }
 
- private boolean hasHistoryOnChangedStemSlots(Registration registration,int term,int oldLength,int newLength,List<LocalDate> oldDates,List<LocalDate> newDates){
-  int lastWeek=Math.max(oldLength,newLength);
-  for(Integer grade:registration.getStemGrades()){
-   StemPlan base=stemPlans.findByRegistration_IdAndGradeAndTerm(registration.getId(),grade,term).orElse(null);
-   List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdAndGradeAndTermOrderByEffectiveFromWeekAsc(registration.getId(),grade,term);
-   List<StemPlanVersion> assignments=new ArrayList<>(versions.stream().filter(StemPlanVersion::isActive).toList());
-   if(base!=null)assignments.add(StemPlanVersion.builder().id(base.getId()).registration(base.getRegistration()).grade(base.getGrade()).term(base.getTerm())
-           .course(base.getCourse()).effectiveFromWeek(base.getEffectiveFromWeek()==null?1:base.getEffectiveFromWeek()).changeNote(base.getChangeNote()).active(true).build());
-   Map<UUID,List<String>> beforeByPlan=new HashMap<>(),afterByPlan=new HashMap<>();
-   for(StemPlanVersion item:assignments){
-    List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(item.getCourse().getId());
-    List<String> stored=stemLessonOrders.findAllByPlanItemIdOrderByPositionAsc(item.getId()).stream().map(StemPlanLessonOrder::getLessonId).toList();
-    beforeByPlan.put(item.getId(),scheduledLessonIds(stored,lessons,oldLength));
-    afterByPlan.put(item.getId(),scheduledLessonIds(stored,lessons,newLength));
-   }
-   for(int weekNo=1;weekNo<=lastWeek;weekNo++){
-    StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);if(assignment==null)continue;
-    List<String> before=beforeByPlan.getOrDefault(assignment.getId(),List.of()),after=afterByPlan.getOrDefault(assignment.getId(),List.of());
-    String eventId=stemEventLessons.findByGrade(grade).map(StemEventLesson::getId).orElse(null);
-    String beforeId=lessonIdAtWeek(before,weekNo,assignment.getEffectiveFromWeek(),oldLength,eventId);
-    String afterId=lessonIdAtWeek(after,weekNo,assignment.getEffectiveFromWeek(),newLength,eventId);
-    if(Objects.equals(beforeId,afterId))continue;
-    LocalDate oldDate=weekNo<=oldDates.size()?oldDates.get(weekNo-1):null;
-    LocalDate newDate=weekNo<=newDates.size()?newDates.get(weekNo-1):null;
-    if(oldDate!=null&&announcements.findByKey(registration.getId()+":stem:"+oldDate).isPresent())return true;
-    if(newDate!=null&&!Objects.equals(newDate,oldDate)&&announcements.findByKey(registration.getId()+":stem:"+newDate).isPresent())return true;
-    if(beforeId!=null&&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),beforeId).isPresent())return true;
-    if(afterId!=null&&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),afterId).isPresent())return true;
-   }
+ private boolean hasHistoryInStemTerm(Registration registration,int term){
+  for(ScheduleWeekResponse week:scheduleService.allWeeksForSummary(registration.getId(),"stem")){
+   List<ScheduleWeekResponse.Item> items=week.items().stream().filter(item->Objects.equals(item.term(),term)).toList();
+   if(items.isEmpty())continue;
+   if(announcements.findByKey(registration.getId()+":stem:"+week.weekStart()).isPresent())return true;
+   for(ScheduleWeekResponse.Item item:items)if(item.planItemId()!=null&&item.lessonId()!=null
+           &&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",item.planItemId(),item.lessonId()).isPresent())return true;
   }
   return false;
- }
-
- private String lessonIdAtWeek(List<String> regularLessonIds,int weekNo,int assignmentStart,int termLength,String eventId){
-  if(weekNo==9&&termLength==9)return eventId;
-  int lessonIndex=weekNo-assignmentStart;
-  return lessonIndex>=0&&lessonIndex<regularLessonIds.size()?regularLessonIds.get(lessonIndex):null;
  }
 
  private boolean hasProgressInTerm(Registration registration,int term){
@@ -411,28 +390,19 @@ public class StudyPlanService {
   return false;
  }
 
-  private int firstEditableStemWeek(Registration r,int term,StemPlan base,List<StemPlanVersion> versions){
-  int termLength=termWeeks(r,term);
-  List<LocalDate> weeks=scheduledStemWeeks(r,term);
-  if(weeks.size()!=termLength){
-   boolean hasProgress=base!=null&&!progress.findAllByPlanTypeAndPlanItemId("STEM",base.getId()).isEmpty()
-           ||versions.stream().anyMatch(v->!progress.findAllByPlanTypeAndPlanItemId("STEM",v.getId()).isEmpty());
-   if(hasProgress)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể xác định tuần đổi khóa vì đăng ký chưa có đủ lịch học.");
-   return 1;
-  }
+ private int firstEditableStemWeek(Registration r,int grade,int term){
+  int termLength=8;
+  List<ScheduleWeekResponse> weeks=scheduleService.allWeeksForSummary(r.getId(),"stem");
   int lastProtected=0;
-  for(int weekNo=1;weekNo<=termLength;weekNo++){
-   LocalDate weekStart=weeks.get(weekNo-1);
-   boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+weekStart).isPresent();
-   StemPlanVersion assignment=activeAssignmentAt(base,versions,weekNo);
-   if(!protectedWeek&&assignment!=null){
-    List<StemLesson> lessons=stemLessons.findAllByCourse_IdOrderByLessonOrderAsc(assignment.getCourse().getId());
-    List<String> order=scheduledLessonIds(assignment.getId(),lessons,termLength);
-    String lessonId=lessonIdAtWeek(order,weekNo,assignment.getEffectiveFromWeek(),termLength,
-            stemEventLessons.findByGrade(assignment.getGrade()).map(StemEventLesson::getId).orElse(null));
-    if(lessonId!=null)protectedWeek=progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",assignment.getId(),lessonId).isPresent();
-   }
-   if(protectedWeek)lastProtected=weekNo;
+  for(ScheduleWeekResponse scheduledWeek:weeks){
+   List<ScheduleWeekResponse.Item> gradeItems=scheduledWeek.items().stream()
+           .filter(item->Objects.equals(item.term(),term)&&Objects.equals(item.grade(),grade))
+           .toList();
+   if(gradeItems.isEmpty())continue;
+   boolean protectedWeek=announcements.findByKey(r.getId()+":stem:"+scheduledWeek.weekStart()).isPresent();
+   for(ScheduleWeekResponse.Item item:gradeItems)if(item.planItemId()!=null&&item.lessonId()!=null
+           &&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",item.planItemId(),item.lessonId()).isPresent())protectedWeek=true;
+   if(protectedWeek)lastProtected=Math.max(lastProtected,gradeItems.stream().mapToInt(item->item.lessonNo()==null?0:item.lessonNo()).max().orElse(0));
   }
   if(lastProtected>=termLength)throw new ResponseStatusException(HttpStatus.CONFLICT,"Cả "+termLength+" tuần của học phần đã được báo hoặc có tiến độ; không còn tuần để đổi khóa.");
   return lastProtected+1;

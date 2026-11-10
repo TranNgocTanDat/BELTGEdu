@@ -58,6 +58,7 @@ public class StemEventCatalogService {
     @Transactional
     public void initializeSharedEvents() {
         List<StemLesson> legacyEvents = lessonRepository.findAllByTitleIgnoreCase(EVENT_TITLE);
+        if (legacyEvents.isEmpty()) return;
         Comparator<StemLesson> preference = Comparator
                 .comparing((StemLesson lesson) -> isBlank(lesson.getNote()) && isBlank(lesson.getDriveImageUrl()))
                 .thenComparing(lesson -> lesson.getCourse().getProgram().name())

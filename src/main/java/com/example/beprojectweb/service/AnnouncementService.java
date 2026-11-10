@@ -5,12 +5,14 @@ import com.example.beprojectweb.dto.request.AnnouncementBulkRequest;
 import com.example.beprojectweb.dto.request.AnnouncementProgressBatchRequest;
 import com.example.beprojectweb.dto.request.LessonProgressRequest;
 import com.example.beprojectweb.dto.response.AnnouncementResponse;
+import com.example.beprojectweb.dto.response.ScheduleWeekResponse;
 import com.example.beprojectweb.entity.Announcement;
 import com.example.beprojectweb.entity.DigitalPlan;
 import com.example.beprojectweb.entity.LessonProgress;
 import com.example.beprojectweb.entity.Registration;
 import com.example.beprojectweb.entity.School;
 import com.example.beprojectweb.entity.StemLesson;
+import com.example.beprojectweb.entity.StemEventGradeLesson;
 import com.example.beprojectweb.entity.StemPlan;
 import com.example.beprojectweb.entity.User;
 import com.example.beprojectweb.enums.Role;
@@ -24,6 +26,8 @@ import com.example.beprojectweb.repository.RegistrationRepository;
 import com.example.beprojectweb.repository.SchoolRepository;
 import com.example.beprojectweb.repository.StemLessonRepository;
 import com.example.beprojectweb.repository.StemEventLessonRepository;
+import com.example.beprojectweb.repository.StemEventGradeLessonRepository;
+import com.example.beprojectweb.repository.RegistrationStemEventRepository;
 import com.example.beprojectweb.repository.StemPlanRepository;
 import com.example.beprojectweb.repository.StemPlanVersionRepository;
 import com.example.beprojectweb.repository.UserRepository;
@@ -62,6 +66,9 @@ public class AnnouncementService {
     private final DigitalPlanRepository digitalPlanRepository;
     private final StemLessonRepository stemLessonRepository;
     private final StemEventLessonRepository stemEventLessonRepository;
+    private final StemEventGradeLessonRepository stemEventGradeLessonRepository;
+    private final RegistrationStemEventRepository registrationStemEventRepository;
+    private final ScheduleService scheduleService;
     private final DigitalLessonRepository digitalLessonRepository;
     private final LessonProgressRepository lessonProgressRepository;
 
@@ -121,7 +128,7 @@ public class AnnouncementService {
         item.setMessage(request.getMessage().trim());
         item.setAnnouncedAt(LocalDateTime.now());
         item.setSchool(school);
-        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE");
+        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE", request.getWeekStart());
         return toResponse(announcementRepository.save(item));
     }
 
@@ -227,7 +234,7 @@ public class AnnouncementService {
         item.setMessage(request.getMessage().trim());
         item.setAnnouncedAt(LocalDateTime.now());
         item.setSchool(school);
-        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE");
+        validateAndUpdateProgress(registration, service, request.getProgress(), "DONE", request.getWeekStart());
         return toResponse(announcementRepository.save(item));
     }
 
@@ -245,7 +252,7 @@ public class AnnouncementService {
         UUID registrationId = UUID.fromString(item.getRegistrationId());
         Registration registration = registrationRepository.findById(registrationId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Registration not found"));
-        validateAndUpdateProgress(registration, item.getService(), request.getProgress(), "TODO");
+        validateAndUpdateProgress(registration, item.getService(), request.getProgress(), "TODO", item.getWeekStart());
         announcementRepository.delete(item);
     }
 
@@ -257,10 +264,20 @@ public class AnnouncementService {
      *  3. Uses saveAll() for DONE updates instead of save() per record.
      */
     private void validateAndUpdateProgress(Registration registration, String service,
-                                           List<LessonProgressRequest> targets, String status) {
+                                           List<LessonProgressRequest> targets, String status, LocalDate weekStart) {
         if (targets == null || targets.isEmpty()) return;
 
         String expectedType = service.equalsIgnoreCase("stem") ? "STEM" : "DIGITAL";
+        Map<String, LocalDate> scheduledEventWeeks = new HashMap<>();
+        if (expectedType.equals("STEM")) {
+            for (ScheduleWeekResponse scheduledWeek : scheduleService.allWeeksForSummary(registration.getId(), "stem")) {
+                for (ScheduleWeekResponse.Item item : scheduledWeek.items()) {
+                    if (item.event() && item.planItemId() != null && item.lessonId() != null) {
+                        scheduledEventWeeks.put(item.planItemId() + ":" + item.lessonId(), scheduledWeek.weekStart());
+                    }
+                }
+            }
+        }
 
         // Collect planItemIds for batch loading
         Set<UUID> planItemIds = new HashSet<>();
@@ -317,11 +334,16 @@ public class AnnouncementService {
                 StemLesson selectedLesson = stemLessonRepository.findById(target.getLessonId()).orElse(null);
                 boolean regularLesson = selectedLesson != null && !isStemEventLesson(selectedLesson)
                         && selectedLesson.getCourse().getId().equals(courseId);
+                StemEventGradeLesson eventLesson = stemEventGradeLessonRepository.findById(target.getLessonId()).orElse(null);
                 boolean sharedEvent = planRegId.equals(registration.getId()) && grade != null && term != null
-                        && registration.getStemGrades().contains(grade)
-                        && termWeeks(registration, term) == 9
-                        && isWeekNinePlan(registration, grade, term, target.getPlanItemId())
-                        && stemEventLessonRepository.existsByIdAndGrade(target.getLessonId(), grade);
+                        && registration.getStemGrades().contains(grade) && eventLesson != null
+                        && eventLesson.getGrade().equals(grade)
+                        && registrationStemEventRepository.findByRegistration_IdAndTermAndEvent_Id(
+                                registration.getId(), term, eventLesson.getEvent().getId())
+                                .isPresent();
+                boolean eventScheduledThisWeek = weekStart.equals(scheduledEventWeeks.get(
+                        target.getPlanItemId() + ":" + target.getLessonId()));
+                sharedEvent = sharedEvent && eventScheduledThisWeek;
                 if (!planRegId.equals(registration.getId()) || (!regularLesson && !sharedEvent)) {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Lesson does not belong to this registration plan");
@@ -383,6 +405,11 @@ public class AnnouncementService {
     private boolean isStemEventLesson(StemLesson lesson) {
         return lesson.getTitle() != null
                 && lesson.getTitle().trim().equalsIgnoreCase("Event tổng kết học phần");
+    }
+
+    private LocalDate weekStart(LocalDate date) {
+        int day = date.getDayOfWeek().getValue();
+        return date.plusDays(day >= 6 ? 8L - day : 1L - day);
     }
 
     private boolean isWeekNinePlan(Registration registration, Integer grade, Integer term, UUID planItemId) {
