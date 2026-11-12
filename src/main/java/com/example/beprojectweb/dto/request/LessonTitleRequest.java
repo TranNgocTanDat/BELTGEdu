@@ -12,4 +12,8 @@ public class LessonTitleRequest {
     private String note;
     @Size(max = 2048)
     private String driveImageUrl;
+    @Size(max = 2048)
+    private String driveImageUrlAig;
+    @Size(max = 2048)
+    private String driveImageUrlEtech;
 }

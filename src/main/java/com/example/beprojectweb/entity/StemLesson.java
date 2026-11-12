@@ -45,4 +45,10 @@ public class StemLesson {
 
     @Column(name = "drive_image_url", length = 2048)
     String driveImageUrl;
+
+    @Column(name = "drive_image_url_aig", length = 2048)
+    String driveImageUrlAig;
+
+    @Column(name = "drive_image_url_etech", length = 2048)
+    String driveImageUrlEtech;
 }

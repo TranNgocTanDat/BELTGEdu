@@ -29,4 +29,10 @@ public class StemEventTemplate {
 
     @Column(nullable = false, length = 200)
     String name;
+
+    @Column(name = "announcement_intro", length = 2000)
+    String announcementIntro;
+
+    @Column(name = "announcement_greeting", length = 3000)
+    String announcementGreeting;
 }

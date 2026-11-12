@@ -13,6 +13,12 @@ public class StemEventTemplateRequest {
     @NotBlank @Size(max = 200)
     private String name;
 
+    @Size(max = 2000)
+    private String announcementIntro;
+
+    @Size(max = 3000)
+    private String announcementGreeting;
+
     @NotEmpty @Size(min = 1, max = 12)
     private List<@Valid StemEventGradeLessonRequest> gradeLessons;
 }

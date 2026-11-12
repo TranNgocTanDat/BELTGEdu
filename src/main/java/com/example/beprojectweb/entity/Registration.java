@@ -14,6 +14,7 @@ public class Registration {
  @ManyToOne(fetch=FetchType.LAZY, optional=false) @JoinColumn(name="school_id", nullable=false) School school;
  @Column(name="academic_year", nullable=false, length=20) String academicYear;
  @Enumerated(EnumType.STRING) @Column(name="stem_program", length=16) com.example.beprojectweb.enums.StemProgram stemProgram;
+ @Enumerated(EnumType.STRING) @Column(name="stem_brand_identity", length=16) com.example.beprojectweb.enums.StemBrandIdentity stemBrandIdentity;
  @Enumerated(EnumType.STRING) @Column(name="digital_program", length=16) com.example.beprojectweb.enums.DigitalProgram digitalProgram;
  @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="registration_stem_grades", joinColumns=@JoinColumn(name="registration_id")) @Column(name="grade", nullable=false) Set<Integer> stemGrades=new LinkedHashSet<>();
  @ElementCollection(fetch=FetchType.EAGER) @CollectionTable(name="registration_digital_grades", joinColumns=@JoinColumn(name="registration_id")) @Column(name="grade", nullable=false) Set<Integer> digitalGrades=new LinkedHashSet<>();

@@ -15,4 +15,6 @@ public class StemLessonResponse {
     private String title;
     private String note;
     private String driveImageUrl;
+    private String driveImageUrlAig;
+    private String driveImageUrlEtech;
 }

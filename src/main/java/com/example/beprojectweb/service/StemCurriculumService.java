@@ -77,7 +77,11 @@ public class StemCurriculumService {
         }
         lesson.setTitle(request.getTitle().trim());
         if (request.getNote() != null) lesson.setNote(normalizeOptional(request.getNote()));
+        if (request.getDriveImageUrlAig() != null) lesson.setDriveImageUrlAig(normalizeOptional(request.getDriveImageUrlAig()));
+        else if (request.getDriveImageUrl() != null) lesson.setDriveImageUrlAig(normalizeOptional(request.getDriveImageUrl()));
+        if (request.getDriveImageUrlEtech() != null) lesson.setDriveImageUrlEtech(normalizeOptional(request.getDriveImageUrlEtech()));
         if (request.getDriveImageUrl() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrl()));
+        else if (request.getDriveImageUrlAig() != null) lesson.setDriveImageUrl(normalizeOptional(request.getDriveImageUrlAig()));
         lesson = lessonRepository.save(lesson);
         return toLessonResponse(lesson);
     }
@@ -147,10 +151,18 @@ public class StemCurriculumService {
                         "Vị trí bài học " + request.getOrder() + " đã được sử dụng trong khóa này.");
             }
         }
-        List<StemLesson> lessons = requests.stream().map(request -> StemLesson.builder()
-                .id(UUID.randomUUID().toString()).course(course)
-                .lessonOrder(request.getOrder()).title(request.getTitle().trim())
-                .note(normalizeOptional(request.getNote())).driveImageUrl(normalizeOptional(request.getDriveImageUrl())).build())
+        List<StemLesson> lessons = requests.stream().map(request -> {
+            String aigImageUrl = request.getDriveImageUrlAig() != null
+                    ? normalizeOptional(request.getDriveImageUrlAig()) : normalizeOptional(request.getDriveImageUrl());
+            String legacyImageUrl = request.getDriveImageUrl() != null
+                    ? normalizeOptional(request.getDriveImageUrl()) : aigImageUrl;
+            return StemLesson.builder()
+                    .id(UUID.randomUUID().toString()).course(course)
+                    .lessonOrder(request.getOrder()).title(request.getTitle().trim())
+                    .note(normalizeOptional(request.getNote())).driveImageUrl(legacyImageUrl)
+                    .driveImageUrlAig(aigImageUrl)
+                    .driveImageUrlEtech(normalizeOptional(request.getDriveImageUrlEtech())).build();
+        })
                 .toList();
         return lessonRepository.saveAll(lessons).stream().map(this::toLessonResponse).toList();
     }
@@ -196,6 +208,8 @@ public class StemCurriculumService {
                 .title(lesson.getTitle())
                 .note(lesson.getNote())
                 .driveImageUrl(lesson.getDriveImageUrl())
+                .driveImageUrlAig(lesson.getDriveImageUrlAig())
+                .driveImageUrlEtech(lesson.getDriveImageUrlEtech())
                 .build();
     }
 

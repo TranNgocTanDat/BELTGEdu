@@ -50,6 +50,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class StemEventManagementService {
+    private static final String EVENT_20_11_ID = "stem-event-20-11";
+    private static final String EVENT_20_11_INTRO = "Nhân dịp kỷ niệm Ngày Nhà giáo Việt Nam 20/11, trong tuần này, Quý Thầy/Cô sẽ triển khai giảng dạy các bài học Event với chủ đề chào mừng Ngày Nhà giáo Việt Nam theo nội dung thông báo báo bài như sau:";
+    private static final String EVENT_20_11_GREETING = "💐 Nhân dịp Ngày Nhà giáo Việt Nam 20/11, kính chúc Quý Thầy/Cô luôn mạnh khỏe, hạnh phúc, tràn đầy nhiệt huyết và thành công trong sự nghiệp trồng người. Chúc Quý Thầy/Cô có một ngày lễ thật ý nghĩa, nhiều niềm vui và nhận được thật nhiều tình cảm yêu thương từ các thế hệ học sinh!";
+
     private final StemEventTemplateRepository templateRepository;
     private final StemEventGradeLessonRepository gradeLessonRepository;
     private final StemEventLessonRepository legacyEventRepository;
@@ -70,6 +74,7 @@ public class StemEventManagementService {
                 .stream().map(this::toGradeLessonResponse)
                 .collect(Collectors.groupingBy(StemEventGradeLessonResponse::eventId, HashMap::new, Collectors.toList()));
         return templates.stream().map(template -> new StemEventTemplateResponse(template.getId(), template.getName(),
+                template.getAnnouncementIntro(), template.getAnnouncementGreeting(),
                 lessons.getOrDefault(template.getId(), List.of()))).toList();
     }
 
@@ -81,7 +86,9 @@ public class StemEventManagementService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Tên Event đã tồn tại.");
         }
         StemEventTemplate template = templateRepository.save(StemEventTemplate.builder()
-                .id(UUID.randomUUID().toString()).name(name).build());
+                .id(UUID.randomUUID().toString()).name(name)
+                .announcementIntro(normalizeOptional(request.getAnnouncementIntro()))
+                .announcementGreeting(normalizeOptional(request.getAnnouncementGreeting())).build());
         saveGradeLessons(template, request.getGradeLessons());
         return getTemplate(template);
     }
@@ -96,6 +103,8 @@ public class StemEventManagementService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Tên Event đã tồn tại.");
         }
         template.setName(name);
+        template.setAnnouncementIntro(normalizeOptional(request.getAnnouncementIntro()));
+        template.setAnnouncementGreeting(normalizeOptional(request.getAnnouncementGreeting()));
         templateRepository.save(template);
         saveGradeLessons(template, request.getGradeLessons());
         return getTemplate(template);
@@ -142,11 +151,6 @@ public class StemEventManagementService {
                     "Hãy thiết lập ngày bắt đầu học phần trước khi xếp Event.");
             if (item.getEventDate().isBefore(start)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Ngày Event phải nằm từ ngày bắt đầu học phần trở đi.");
-            LocalDate nextStart = item.getTerm() < 4 ? termStart(registration, item.getTerm() + 1) : null;
-            if (nextStart != null && !item.getEventDate().isBefore(nextStart)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Ngày Event phải trước ngày bắt đầu học phần kế tiếp.");
-            }
             StemEventTemplate selectedEvent = templateRepository.findById(item.getEventId()).orElseThrow(() ->
                     new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Event đã chọn."));
             Set<Integer> contentGrades = gradeLessonRepository.findAllByEvent_IdOrderByGradeAsc(selectedEvent.getId())
@@ -175,10 +179,11 @@ public class StemEventManagementService {
 
     @Transactional
     public void initializeTemplates() {
-        seedTemplate("stem-event-20-10", "20/10 - Ngày Phụ nữ Việt Nam");
-        seedTemplate("stem-event-20-11", "20/11 - Ngày Nhà giáo Việt Nam");
-        seedTemplate("stem-event-mid-autumn", "Tết Trung Thu");
-        seedTemplate("stem-event-lunar-new-year", "Tết Nguyên Đán");
+        seedTemplate("stem-event-20-10", "20/10 - Ngày Phụ nữ Việt Nam", null, null);
+        seedTemplate(EVENT_20_11_ID, "20/11 - Ngày Nhà giáo Việt Nam", EVENT_20_11_INTRO, EVENT_20_11_GREETING);
+        seedTemplate("stem-event-mid-autumn", "Tết Trung Thu", null, null);
+        seedTemplate("stem-event-lunar-new-year", "Tết Nguyên Đán", null, null);
+        seedEventAnnouncementDefaultsOnce();
 
         List<StemEventLesson> legacy = legacyEventRepository.findAllByOrderByGradeAsc();
         if (!legacy.isEmpty() && !templateRepository.existsById("stem-event-legacy-final")) {
@@ -217,6 +222,20 @@ public class StemEventManagementService {
         jdbcTemplate.update("INSERT INTO curriculum_seed_history (seed_key) VALUES (?)", migrationKey);
     }
 
+    private void seedEventAnnouncementDefaultsOnce() {
+        final String migrationKey = "stem-event-announcement-copy-v1";
+        Integer completed = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM curriculum_seed_history WHERE seed_key = ?", Integer.class, migrationKey);
+        if (completed != null && completed > 0) return;
+        templateRepository.findById(EVENT_20_11_ID).ifPresent(template -> {
+            if (template.getAnnouncementIntro() == null || template.getAnnouncementIntro().isBlank())
+                template.setAnnouncementIntro(EVENT_20_11_INTRO);
+            if (template.getAnnouncementGreeting() == null || template.getAnnouncementGreeting().isBlank())
+                template.setAnnouncementGreeting(EVENT_20_11_GREETING);
+            templateRepository.save(template);
+        });
+        jdbcTemplate.update("INSERT INTO curriculum_seed_history (seed_key) VALUES (?)", migrationKey);
+    }
+
     private LocalDate legacyWeekNineDate(Registration registration, int term, List<Holiday> holidays) {
         LocalDate start = termStart(registration, term);
         if (start == null) return null;
@@ -238,9 +257,14 @@ public class StemEventManagementService {
         return scheduled;
     }
 
-    private void seedTemplate(String id, String name) {
-        if (templateRepository.existsById(id)) return;
-        StemEventTemplate template = templateRepository.save(StemEventTemplate.builder().id(id).name(name).build());
+    private void seedTemplate(String id, String name, String defaultIntro, String defaultGreeting) {
+        StemEventTemplate template = templateRepository.findById(id).orElse(null);
+        boolean created = template == null;
+        if (created) {
+            template = templateRepository.save(StemEventTemplate.builder().id(id).name(name)
+                    .announcementIntro(defaultIntro).announcementGreeting(defaultGreeting).build());
+        }
+        if (!created) return;
         List<StemEventGradeLesson> lessons = new ArrayList<>();
         for (int grade = 1; grade <= 12; grade++) lessons.add(StemEventGradeLesson.builder()
                 .id(gradeLessonId(id, grade)).event(template).grade(grade).title(name).build());
@@ -264,6 +288,7 @@ public class StemEventManagementService {
 
     private StemEventTemplateResponse getTemplate(StemEventTemplate template) {
         return new StemEventTemplateResponse(template.getId(), template.getName(),
+                template.getAnnouncementIntro(), template.getAnnouncementGreeting(),
                 gradeLessonRepository.findAllByEvent_IdOrderByGradeAsc(template.getId()).stream()
                         .map(this::toGradeLessonResponse).toList());
     }
