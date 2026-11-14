@@ -54,9 +54,9 @@ public class ScheduleService {
   List<StemPlan> basePlans=stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(r.getId());
   List<StemPlanVersion> versions=stemPlanVersions.findAllByRegistration_IdInAndActiveTrueOrderByGradeAscTermAscEffectiveFromWeekAsc(List.of(r.getId()));
   List<UUID> planIds=new ArrayList<>();basePlans.forEach(p->planIds.add(p.getId()));versions.forEach(p->planIds.add(p.getId()));
-  Map<UUID,List<String>> lessonOrders=new HashMap<>();
+  Map<UUID,List<StemPlanLessonOrder>> lessonOrders=new HashMap<>();
   if(!planIds.isEmpty())stemLessonOrders.findAllByPlanItemIdInOrderByPlanItemIdAscPositionAsc(planIds)
-          .forEach(item->lessonOrders.computeIfAbsent(item.getPlanItemId(),key->new ArrayList<>()).add(item.getLessonId()));
+          .forEach(item->lessonOrders.computeIfAbsent(item.getPlanItemId(),key->new ArrayList<>()).add(item));
   List<String> courseIds=new ArrayList<>();basePlans.forEach(p->courseIds.add(p.getCourse().getId()));versions.forEach(p->courseIds.add(p.getCourse().getId()));
   List<String> distinctCourseIds=courseIds.stream().distinct().toList();
   Map<String,List<StemLesson>> lessonsByCourse=distinctCourseIds.isEmpty()?Map.of():stemLessons.findAllByCourse_IdInOrderByCourse_IdAscLessonOrderAsc(distinctCourseIds)
@@ -94,9 +94,13 @@ public class ScheduleService {
       SchedulePlan assigned=activePlan(grade,term,lessonSlot,baseByTerm,versionsByTerm);if(assigned==null)continue;
       List<StemLesson> catalog=lessonsByCourse.getOrDefault(assigned.course().getId(),List.of()).stream().filter(item->!isStemEventLesson(item)).toList();
       Map<String,StemLesson> byId=catalog.stream().collect(java.util.stream.Collectors.toMap(StemLesson::getId,item->item));
-      List<String> ids=lessonOrders.getOrDefault(assigned.id(),List.of());List<StemLesson> ordered=new ArrayList<>();
+      List<StemPlanLessonOrder> storedRows=lessonOrders.getOrDefault(assigned.id(),List.of());
+      List<String> ids=storedRows.stream().map(StemPlanLessonOrder::getLessonId).toList();
+      Set<String> excludedIds=storedRows.stream().filter(StemPlanLessonOrder::isExcluded).map(StemPlanLessonOrder::getLessonId).collect(java.util.stream.Collectors.toSet());
+      List<StemLesson> ordered=new ArrayList<>();
       for(String lessonId:ids)if(byId.containsKey(lessonId)&&ordered.stream().noneMatch(item->item.getId().equals(lessonId)))ordered.add(byId.get(lessonId));
       for(StemLesson lesson:catalog)if(ordered.stream().noneMatch(item->item.getId().equals(lesson.getId())))ordered.add(lesson);
+      ordered.removeIf(item->excludedIds.contains(item.getId()));
       int assignedIndex=lessonSlot-assigned.effectiveWeek();List<StemLesson> scheduledLessons=ordered.stream().limit(maxRegularSlots).toList();
       if(assignedIndex>=0&&assignedIndex<scheduledLessons.size()){
        StemLesson lesson=scheduledLessons.get(assignedIndex);

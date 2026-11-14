@@ -12,4 +12,5 @@ public class StemPlanLessonOrderRequest {
     private Integer term;
     private UUID planItemId;
     private List<String> lessonIds;
+    private List<String> excludedLessonIds;
 }

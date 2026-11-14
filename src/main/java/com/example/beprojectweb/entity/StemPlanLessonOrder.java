@@ -20,4 +20,5 @@ public class StemPlanLessonOrder {
     @Column(name = "plan_item_id", nullable = false) UUID planItemId;
     @Column(name = "lesson_id", nullable = false, length = 100) String lessonId;
     @Column(name = "lesson_position", nullable = false) Integer position;
+    @Column(name = "is_excluded", nullable = false, columnDefinition = "boolean default false") boolean excluded;
 }
