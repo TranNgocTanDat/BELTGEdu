@@ -3,6 +3,7 @@ package com.example.beprojectweb.controller;
 import com.example.beprojectweb.dto.response.APIResponse;
 import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.StemCourseRequest;
+import com.example.beprojectweb.dto.request.StemCourseDuplicateRequest;
 import com.example.beprojectweb.dto.request.StemLessonCreateRequest;
 import com.example.beprojectweb.dto.request.StemEventLessonRequest;
 import com.example.beprojectweb.dto.response.StemCourseResponse;
@@ -59,6 +60,12 @@ public class StemCurriculumController {
     @PostMapping("/courses")
     public APIResponse<StemCourseResponse> createCourse(@RequestBody @jakarta.validation.Valid StemCourseRequest request) {
         return APIResponse.<StemCourseResponse>builder().result(curriculumService.createCourse(request)).build();
+    }
+
+    @PostMapping("/courses/{id}/duplicate")
+    public APIResponse<StemCourseResponse> duplicateCourse(@PathVariable String id,
+            @RequestBody @jakarta.validation.Valid StemCourseDuplicateRequest request) {
+        return APIResponse.<StemCourseResponse>builder().result(curriculumService.duplicateCourse(id, request)).build();
     }
 
     @PutMapping("/courses/{id}")

@@ -4,6 +4,7 @@ import com.example.beprojectweb.dto.response.StemCourseResponse;
 import com.example.beprojectweb.dto.response.StemLessonResponse;
 import com.example.beprojectweb.dto.request.LessonTitleRequest;
 import com.example.beprojectweb.dto.request.StemCourseRequest;
+import com.example.beprojectweb.dto.request.StemCourseDuplicateRequest;
 import com.example.beprojectweb.dto.request.StemLessonCreateRequest;
 import com.example.beprojectweb.entity.StemCourse;
 import com.example.beprojectweb.entity.StemLesson;
@@ -97,6 +98,62 @@ public class StemCurriculumService {
         course.setId(UUID.randomUUID().toString());
         course = courseRepository.save(course);
         return toCourseResponse(course, List.of());
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
+    @Transactional
+    public StemCourseResponse duplicateCourse(String sourceId, StemCourseDuplicateRequest request) {
+        StemCourse source = courseRepository.findById(sourceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "STEM course not found"));
+        String code = request.getCode().trim();
+        if (courseRepository.existsByProgramAndCodeIgnoreCase(source.getProgram(), code)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Mã khóa học đã tồn tại trong chương trình này");
+        }
+
+        Set<Integer> orders = new HashSet<>();
+        for (int index = 0; index < request.getLessons().size(); index++) {
+            StemLessonCreateRequest lesson = request.getLessons().get(index);
+            if (isStemEventTitle(lesson.getTitle())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Event được quản lý dùng chung, không sao chép vào khóa STEM thường.");
+            }
+            if (!orders.add(lesson.getOrder()) || lesson.getOrder() != index + 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Thứ tự bài trong bản sao phải liên tiếp từ 1.");
+            }
+        }
+
+        StemCourse copy = StemCourse.builder()
+                .id(UUID.randomUUID().toString())
+                .code(code)
+                .program(source.getProgram())
+                .subject(source.getSubject())
+                .grade(source.getGrade())
+                .module(source.getModule())
+                .part(source.getPart())
+                .build();
+        copy = courseRepository.save(copy);
+        StemCourse savedCourse = copy;
+
+        List<StemLesson> copiedLessons = request.getLessons().stream().map(lesson -> {
+            String aigImageUrl = lesson.getDriveImageUrlAig() != null
+                    ? normalizeOptional(lesson.getDriveImageUrlAig()) : normalizeOptional(lesson.getDriveImageUrl());
+            String legacyImageUrl = lesson.getDriveImageUrl() != null
+                    ? normalizeOptional(lesson.getDriveImageUrl()) : aigImageUrl;
+            return StemLesson.builder()
+                    .id(UUID.randomUUID().toString())
+                    .course(savedCourse)
+                    .lessonOrder(lesson.getOrder())
+                    .title(lesson.getTitle().trim())
+                    .note(normalizeOptional(lesson.getNote()))
+                    .driveImageUrl(legacyImageUrl)
+                    .driveImageUrlAig(aigImageUrl)
+                    .driveImageUrlEtech(normalizeOptional(lesson.getDriveImageUrlEtech()))
+                    .build();
+        }).toList();
+        List<StemLessonResponse> savedLessons = lessonRepository.saveAll(copiedLessons).stream()
+                .map(this::toLessonResponse).toList();
+        return toCourseResponse(savedCourse, savedLessons);
     }
 
     @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL')")
