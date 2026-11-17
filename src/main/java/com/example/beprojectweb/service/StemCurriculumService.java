@@ -111,17 +111,21 @@ public class StemCurriculumService {
         }
 
         Set<Integer> orders = new HashSet<>();
-        for (int index = 0; index < request.getLessons().size(); index++) {
-            StemLessonCreateRequest lesson = request.getLessons().get(index);
+        for (StemLessonCreateRequest lesson : request.getLessons()) {
+            if (lesson == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Danh sách bài học có mục trống.");
+            }
             if (isStemEventTitle(lesson.getTitle())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Event được quản lý dùng chung, không sao chép vào khóa STEM thường.");
             }
-            if (!orders.add(lesson.getOrder()) || lesson.getOrder() != index + 1) {
+            if (!orders.add(lesson.getOrder())) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Thứ tự bài trong bản sao phải liên tiếp từ 1.");
+                        "Thứ tự bài bị trùng; vui lòng kiểm tra danh sách bản sao.");
             }
         }
+        List<StemLessonCreateRequest> lessonsByOrder = request.getLessons().stream()
+                .sorted(Comparator.comparing(StemLessonCreateRequest::getOrder)).toList();
 
         StemCourse copy = StemCourse.builder()
                 .id(UUID.randomUUID().toString())
@@ -135,22 +139,24 @@ public class StemCurriculumService {
         copy = courseRepository.save(copy);
         StemCourse savedCourse = copy;
 
-        List<StemLesson> copiedLessons = request.getLessons().stream().map(lesson -> {
+        List<StemLesson> copiedLessons = new ArrayList<>();
+        for (int index = 0; index < lessonsByOrder.size(); index++) {
+            StemLessonCreateRequest lesson = lessonsByOrder.get(index);
             String aigImageUrl = lesson.getDriveImageUrlAig() != null
                     ? normalizeOptional(lesson.getDriveImageUrlAig()) : normalizeOptional(lesson.getDriveImageUrl());
             String legacyImageUrl = lesson.getDriveImageUrl() != null
                     ? normalizeOptional(lesson.getDriveImageUrl()) : aigImageUrl;
-            return StemLesson.builder()
+            copiedLessons.add(StemLesson.builder()
                     .id(UUID.randomUUID().toString())
                     .course(savedCourse)
-                    .lessonOrder(lesson.getOrder())
+                    .lessonOrder(index + 1)
                     .title(lesson.getTitle().trim())
                     .note(normalizeOptional(lesson.getNote()))
                     .driveImageUrl(legacyImageUrl)
                     .driveImageUrlAig(aigImageUrl)
                     .driveImageUrlEtech(normalizeOptional(lesson.getDriveImageUrlEtech()))
-                    .build();
-        }).toList();
+                    .build());
+        }
         List<StemLessonResponse> savedLessons = lessonRepository.saveAll(copiedLessons).stream()
                 .map(this::toLessonResponse).toList();
         return toCourseResponse(savedCourse, savedLessons);
