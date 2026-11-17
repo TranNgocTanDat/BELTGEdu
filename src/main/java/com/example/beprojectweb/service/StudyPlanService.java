@@ -214,6 +214,7 @@ public class StudyPlanService {
            ||currentScheduledOrder.indexOf(saved.getLessonId())!=requestedScheduledOrder.indexOf(saved.getLessonId())))
     throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể bỏ hoặc di chuyển bài đã có tiến độ.");
   stemLessonOrders.deleteAllByPlanItemId(assignment.getId());
+  stemLessonOrders.flush();
   List<StemPlanLessonOrder> rows=new ArrayList<>();
   for(int i=0;i<req.getLessonIds().size();i++)rows.add(StemPlanLessonOrder.builder()
           .planItemId(assignment.getId()).lessonId(req.getLessonIds().get(i)).position(i+1)

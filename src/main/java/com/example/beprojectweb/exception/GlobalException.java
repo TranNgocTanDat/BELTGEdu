@@ -5,9 +5,19 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.server.ResponseStatusException;
 
 @ControllerAdvice
 public class GlobalException {
+    @ExceptionHandler(value = ResponseStatusException.class)
+    ResponseEntity<APIResponse> handlingResponseStatusException(ResponseStatusException exception) {
+        APIResponse apiResponse = new APIResponse();
+        int status = exception.getStatusCode().value();
+        apiResponse.setCode(status);
+        apiResponse.setMessage(exception.getReason() == null ? "Yêu cầu không thể thực hiện." : exception.getReason());
+        return ResponseEntity.status(exception.getStatusCode()).body(apiResponse);
+    }
+
     //Bắt mọi lỗi ngoại lệ chưa biết
     @ExceptionHandler(value = Exception.class)
     ResponseEntity<APIResponse> handlingException(Exception exception){
