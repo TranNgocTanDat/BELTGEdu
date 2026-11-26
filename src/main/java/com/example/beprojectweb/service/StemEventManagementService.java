@@ -4,6 +4,7 @@ import com.example.beprojectweb.dto.request.RegistrationStemEventsRequest;
 import com.example.beprojectweb.dto.request.StemEventGradeLessonRequest;
 import com.example.beprojectweb.dto.request.StemEventTemplateRequest;
 import com.example.beprojectweb.dto.response.RegistrationStemEventResponse;
+import com.example.beprojectweb.dto.response.ScheduleWeekResponse;
 import com.example.beprojectweb.dto.response.StemEventGradeLessonResponse;
 import com.example.beprojectweb.dto.response.StemEventTemplateResponse;
 import com.example.beprojectweb.entity.Registration;
@@ -63,6 +64,7 @@ public class StemEventManagementService {
     private final SchoolClosureRepository closureRepository;
     private final HolidayRepository holidayRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final ScheduleService scheduleService;
 
     @Transactional(readOnly = true)
     @PreAuthorize("hasAnyRole('USER','ADMIN','ADMIN_SCHOOL')")
@@ -137,6 +139,8 @@ public class StemEventManagementService {
                 ? List.of() : request.getAssignments();
         List<RegistrationStemEvent> existing = assignmentRepository
                 .findAllByRegistration_IdOrderByTermAscEventDateAsc(registrationId);
+        List<ScheduleWeekResponse> previousSchedule = registration.getStemProgram() == null
+                ? List.of() : scheduleService.allWeeksForSummary(registrationId, "stem");
         Map<String, RegistrationStemEvent> existingByKey = existing.stream().collect(Collectors.toMap(
                 item -> item.getTerm() + ":" + item.getEvent().getId(), Function.identity()));
         Set<String> uniqueEvents = new HashSet<>();
@@ -173,6 +177,9 @@ public class StemEventManagementService {
         }
         existing.stream().filter(item -> !kept.contains(item.getTerm() + ":" + item.getEvent().getId()))
                 .forEach(assignmentRepository::delete);
+        if (registration.getStemProgram() != null) {
+            scheduleService.assertStemHistoryUnchanged(registrationId, previousSchedule);
+        }
         saved.sort(Comparator.comparing(RegistrationStemEvent::getTerm).thenComparing(RegistrationStemEvent::getEventDate));
         return saved.stream().map(this::toAssignmentResponse).toList();
     }

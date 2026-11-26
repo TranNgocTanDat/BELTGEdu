@@ -33,7 +33,26 @@ public class StudyPlanService {
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
  public RegistrationResponse create(RegistrationRequest req){ validate(req); School school=schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found")); assertAccess(current(),school); if(registrations.existsBySchool_IdAndAcademicYear(school.getId(),req.getAcademicYear().trim())) throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year"); Registration r=map(req,school,new Registration()); r=registrations.save(r); if(r.getDigitalProgram()!=null) for(Integer g:r.getDigitalGrades()) digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build()); return response(r); }
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
- public RegistrationResponse update(UUID id,RegistrationRequest req){ validate(req); Registration r=findRegistration(id); assertAccess(current(),r.getSchool()); School school=req.getSchoolId()==null?r.getSchool():schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found")); assertAccess(current(),school); if(registrations.existsBySchool_IdAndAcademicYearAndIdNot(school.getId(),req.getAcademicYear().trim(),id)) throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year"); validateStemTermWeekChange(r,req); reconcile(r,req); map(req,school,r); r=registrations.save(r); if(r.getDigitalProgram()!=null) for(Integer g:r.getDigitalGrades()) if(digitalPlans.findByRegistration_IdAndGrade(r.getId(),g).isEmpty()) digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build()); return response(r); }
+ public RegistrationResponse update(UUID id,RegistrationRequest req){
+  validate(req); Registration r=findRegistration(id); assertAccess(current(),r.getSchool());
+  School school=req.getSchoolId()==null?r.getSchool():schools.findById(req.getSchoolId()).orElseThrow(()->notFound("School not found"));
+  assertAccess(current(),school);
+  if(registrations.existsBySchool_IdAndAcademicYearAndIdNot(school.getId(),req.getAcademicYear().trim(),id))
+   throw new ResponseStatusException(HttpStatus.CONFLICT,"This school already has a registration for the academic year");
+
+  boolean keepStemConfiguration=r.getStemProgram()!=null&&req.getStem()!=null
+          &&r.getStemProgram()==req.getStem().getProgram()
+          &&new HashSet<>(r.getStemGrades()).equals(req.getStem().getGrades());
+  List<ScheduleWeekResponse> previousStemSchedule=keepStemConfiguration
+          ?scheduleService.allWeeksForSummary(id,"stem"):List.of();
+
+  validateStemTermWeekChange(r,req); reconcile(r,req); map(req,school,r);
+  if(keepStemConfiguration)scheduleService.assertStemHistoryUnchanged(id,previousStemSchedule);
+  r=registrations.save(r);
+  if(r.getDigitalProgram()!=null)for(Integer g:r.getDigitalGrades())
+   if(digitalPlans.findByRegistration_IdAndGrade(r.getId(),g).isEmpty())digitalPlans.save(DigitalPlan.builder().registration(r).grade(g).build());
+  return response(r);
+ }
  @PreAuthorize("hasAnyRole('ADMIN','ADMIN_SCHOOL','USER')") @Transactional
  public void delete(UUID id){
   Registration r=findRegistration(id); assertAccess(current(),r.getSchool());
@@ -360,8 +379,6 @@ public class StudyPlanService {
   for(int term=1;term<=4;term++){
    int oldLength=oldWeeks.get(term),newLength=newWeeks.get(term);
    if(oldLength==newLength)continue;
-   if(hasHistoryInStemTerm(registration,term))
-    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần này đã có báo bài hoặc tiến độ.");
    if(newLength<oldLength){
     final int changedTerm=term;
     if(stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(registration.getId()).stream()
@@ -370,35 +387,7 @@ public class StudyPlanService {
             .anyMatch(plan->plan.getTerm()==changedTerm&&plan.isActive()&&plan.getEffectiveFromWeek()>newLength))
      throw new ResponseStatusException(HttpStatus.CONFLICT,"Có kế hoạch đổi khóa bắt đầu sau tuần "+newLength+"; hãy xử lý kế hoạch đó trước khi rút ngắn học phần.");
    }
-   for(int later=term+1;later<=4;later++){
-    final int laterTerm=later;
-    boolean announcedLater=scheduleService.allWeeksForSummary(registration.getId(),"stem").stream()
-            .filter(week->week.items().stream().anyMatch(item->Objects.equals(item.term(),laterTerm)))
-            .anyMatch(week->announcements.findByKey(registration.getId()+":stem:"+week.weekStart()).isPresent());
-    if(announcedLater)throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có báo bài; cần giữ nguyên ngày lịch sử.");
-    if(hasProgressInTerm(registration,later))
-     throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể đổi số tuần vì học phần "+later+" đã có tiến độ; cần giữ nguyên kế hoạch lịch sử.");
-   }
   }
- }
-
- private boolean hasHistoryInStemTerm(Registration registration,int term){
-  for(ScheduleWeekResponse week:scheduleService.allWeeksForSummary(registration.getId(),"stem")){
-   List<ScheduleWeekResponse.Item> items=week.items().stream().filter(item->Objects.equals(item.term(),term)).toList();
-   if(items.isEmpty())continue;
-   if(announcements.findByKey(registration.getId()+":stem:"+week.weekStart()).isPresent())return true;
-   for(ScheduleWeekResponse.Item item:items)if(item.planItemId()!=null&&item.lessonId()!=null
-           &&progress.findByPlanTypeAndPlanItemIdAndLessonId("STEM",item.planItemId(),item.lessonId()).isPresent())return true;
-  }
-  return false;
- }
-
- private boolean hasProgressInTerm(Registration registration,int term){
-  for(StemPlan plan:stemPlans.findAllByRegistration_IdOrderByGradeAscTermAsc(registration.getId()))
-   if(plan.getTerm()==term&&!progress.findAllByPlanTypeAndPlanItemId("STEM",plan.getId()).isEmpty())return true;
-  for(StemPlanVersion plan:stemPlanVersions.findAllByRegistration_IdOrderByGradeAscTermAscEffectiveFromWeekAsc(registration.getId()))
-   if(plan.getTerm()==term&&!progress.findAllByPlanTypeAndPlanItemId("STEM",plan.getId()).isEmpty())return true;
-  return false;
  }
 
  private int firstEditableStemWeek(Registration r,int grade,int term){

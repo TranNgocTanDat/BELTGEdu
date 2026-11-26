@@ -23,7 +23,7 @@ public class ScheduleService {
  private final RegistrationRepository registrations; private final StemPlanRepository stemPlans; private final StemPlanVersionRepository stemPlanVersions; private final StemPlanLessonOrderRepository stemLessonOrders; private final DigitalPlanRepository digitalPlans;
  private final StemCourseRepository courses; private final StemLessonRepository stemLessons; private final DigitalLessonRepository digitalLessons;
  private final RegistrationStemEventRepository registrationStemEvents; private final StemEventGradeLessonRepository stemEventGradeLessons;
- private final SchoolClosureRepository closures; private final AnnouncementRepository announcements; private final UserRepository users;
+ private final SchoolClosureRepository closures; private final AnnouncementRepository announcements; private final LessonProgressRepository progress; private final UserRepository users;
  private final HolidayRepository holidays;
  private record MutableWeek(LocalDate start,LinkedHashSet<String> labels,List<ScheduleWeekResponse.Item> items){}
 
@@ -34,6 +34,45 @@ public class ScheduleService {
  @Transactional(readOnly=true)
  public List<ScheduleWeekResponse> allWeeksForSummary(UUID registrationId,String service){
   return buildWeeks(registrationId,service,false);
+ }
+ public void assertStemHistoryUnchanged(UUID registrationId,List<ScheduleWeekResponse> before){
+  List<ScheduleWeekResponse> after=allWeeksForSummary(registrationId,"stem");
+  Map<LocalDate,ScheduleWeekResponse> afterByDate=new HashMap<>();
+  after.forEach(week->afterByDate.put(week.weekStart(),week));
+  for(ScheduleWeekResponse oldWeek:before){
+   if(!oldWeek.announced())continue;
+   ScheduleWeekResponse newWeek=afterByDate.get(oldWeek.weekStart());
+   if(newWeek==null||!weekSignature(oldWeek).equals(weekSignature(newWeek)))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể thay đổi lịch vì nội dung của tuần "+oldWeek.weekStart()+" đã báo bài. Các tuần đã báo phải được giữ nguyên.");
+  }
+
+  Set<UUID> planIds=before.stream().flatMap(week->week.items().stream())
+          .map(ScheduleWeekResponse.Item::planItemId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+  if(planIds.isEmpty())return;
+  for(LessonProgress item:progress.findAllByPlanItemIdIn(planIds)){
+   if(!"STEM".equalsIgnoreCase(item.getPlanType()))continue;
+   Set<String> oldPlacements=lessonPlacements(before,item.getPlanItemId(),item.getLessonId());
+   if(oldPlacements.isEmpty())continue;
+   Set<String> newPlacements=lessonPlacements(after,item.getPlanItemId(),item.getLessonId());
+   if(!oldPlacements.equals(newPlacements))
+    throw new ResponseStatusException(HttpStatus.CONFLICT,"Không thể thay đổi lịch vì bài đã có tiến độ sẽ đổi tuần hoặc không còn trong lịch.");
+  }
+ }
+ private Set<String> lessonPlacements(List<ScheduleWeekResponse> weeks,UUID planItemId,String lessonId){
+  Set<String> placements=new HashSet<>();
+  for(ScheduleWeekResponse week:weeks)for(ScheduleWeekResponse.Item item:week.items())
+   if(Objects.equals(item.planItemId(),planItemId)&&Objects.equals(item.lessonId(),lessonId))
+    placements.add(week.weekStart()+"|"+weekSignature(item));
+  return placements;
+ }
+ private List<String> weekSignature(ScheduleWeekResponse week){
+  return week.items().stream().map(this::weekSignature).sorted().toList();
+ }
+ private String weekSignature(ScheduleWeekResponse.Item item){
+  return String.join("|",Objects.toString(item.grade(),""),Objects.toString(item.code(),""),
+          Objects.toString(item.title(),""),Objects.toString(item.lessonNo(),""),Objects.toString(item.term(),""),
+          Objects.toString(item.originalWeekStart(),""),Objects.toString(item.lessonId(),""),Objects.toString(item.planItemId(),""),
+          Boolean.toString(item.event()));
  }
  private List<ScheduleWeekResponse> buildWeeks(UUID registrationId,String service,boolean onlyReportableTerms){
   Registration reg=registrations.findById(registrationId).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Registration not found")); assertAccess(current(),reg.getSchool());
